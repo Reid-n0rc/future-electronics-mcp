@@ -1,0 +1,30 @@
+# gitleaks configuration. See SECURITY.md: keys are never stored in this repo.
+# Runs in CI (.github/workflows/ci.yml). Locally: `gitleaks git .`
+
+title = "future-electronics-mcp gitleaks config"
+
+[extend]
+# Keep all of gitleaks' built-in rules and add the project-specific rule below.
+useDefault = true
+
+[[rules]]
+id = "future-electronics-license-key"
+description = "Future Electronics API license key (x-orbweaver-licensekey / FUTURE_API_KEY)"
+# Matches the header or variable name followed by `:` or `=` and a real-looking
+# value of 16 or more characters. Placeholders such as `$FUTURE_API_KEY`,
+# `${FUTURE_API_KEY}`, and `<value>` start with characters outside the value
+# class, so they never match; short dummies like `test-key` are under 16.
+regex = '''(?i)(?:x-orbweaver-licensekey|future_api_key)["']?\s*[:=]\s*["']?([A-Za-z0-9_\-+/.]{16,})'''
+secretGroup = 1
+keywords = ["x-orbweaver-licensekey", "future_api_key"]
+
+[allowlist]
+description = "Documented placeholders and the committed example env file"
+paths = ['''(^|/)\.env\.example$''']
+regexes = [
+  '''^test-key$''',
+  '''^your-key-here$''',
+  '''^\$FUTURE_API_KEY$''',
+  '''^\$\{FUTURE_API_KEY\}$''',
+  '''^<value>$''',
+]
