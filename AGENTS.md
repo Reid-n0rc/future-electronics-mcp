@@ -30,6 +30,12 @@ Product Information API. For the API summary and planned tools, see README.md.
    ```
 4. **Open pull requests against `dev`.** Never push directly to `dev` or
    `master`.
+   - **Review rules:** a ruleset protects `master` and `dev`. A PR from a
+     non-admin needs approval from a code owner (see `.github/CODEOWNERS`)
+     before it can merge, and new pushes dismiss the approval. Admins also
+     must use a PR, but they may merge their own without approval
+     (`gh pr merge --admin`). To make someone an approver, add them to
+     CODEOWNERS through a PR.
 5. **Only the maintainer promotes `dev` to `master`**, through a pull request.
    Releases and tags come only from `master`.
 6. **Do not push, tag, release, or bump versions** unless the maintainer
