@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "live-check": "tsx scripts/live-check.ts",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "bundle": "node scripts/bundle.mjs"
   },
   "license": "AGPL-3.0-or-later",
   "dependencies": {
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "0.28.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^5.0.1"
