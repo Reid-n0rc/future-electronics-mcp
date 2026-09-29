@@ -1,19 +1,21 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { lazyClientProvider, type ClientProvider } from "./tools/common.js";
+import { registerLookupPartTool } from "./tools/lookupPart.js";
 
 export const SERVER_NAME = "future-electronics-mcp";
 export const SERVER_VERSION = "0.1.0";
 
 /**
- * Register all MCP tools on the server. No tools are registered yet; the
- * Future Electronics lookup tools are added by later issues.
+ * Register all MCP tools on the server. The client is created lazily, so the
+ * server starts without a key and a missing key surfaces only on a tool call.
  */
-export function registerTools(_server: McpServer): void {
-  // Intentionally empty.
+export function registerTools(server: McpServer, getClient: ClientProvider = lazyClientProvider()): void {
+  registerLookupPartTool(server, getClient);
 }
 
 /** Create a new, unconnected MCP server with all tools registered. */
-export function createServer(): McpServer {
+export function createServer(getClient: ClientProvider = lazyClientProvider()): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
-  registerTools(server);
+  registerTools(server, getClient);
   return server;
 }

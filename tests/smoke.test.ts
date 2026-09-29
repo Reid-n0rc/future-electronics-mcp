@@ -39,9 +39,9 @@ describe("registerTools", () => {
     expect(registerTools(fresh())).toBeUndefined();
   });
 
-  it("can be called repeatedly on the same server while it registers no tools", () => {
+  it("rejects registering the same tools twice on one server", () => {
     const server = fresh();
     registerTools(server);
-    expect(() => registerTools(server)).not.toThrow();
+    expect(() => registerTools(server)).toThrow(/already registered/);
   });
 });
