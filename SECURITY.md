@@ -10,6 +10,12 @@ documentation example.
   **only** at runtime through the `FUTURE_API_KEY` environment variable. It can
   also come from a secret manager that populates that variable, such as
   1Password.
+- When you install the Claude Code plugin, Claude Code prompts for the key
+  (the `future_api_key` option, marked `sensitive`). It masks the input,
+  stores the key in the operating system's secure credential store rather than
+  in `settings.json` or this repository, and passes it to the server as
+  `FUTURE_API_KEY`. The plugin manifest holds only the
+  `${user_config.future_api_key}` reference, never a value.
 - `.env` and `.env.*` files are git-ignored. The only committed env file is
   `.env.example`, and it contains placeholder values only.
 - Tests must use mocked HTTP responses and dummy keys such as `test-key`. Live

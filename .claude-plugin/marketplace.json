@@ -1,0 +1,20 @@
+{
+  "name": "future-electronics-mcp",
+  "owner": {
+    "name": "Reid Crowe"
+  },
+  "metadata": {
+    "description": "Future Electronics part, stock, lead time, and pricing lookup for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "future-electronics",
+      "description": "MCP server for the Future Electronics Product Information API: part, stock, lead time, and price-break lookup by manufacturer part number",
+      "source": {
+        "source": "github",
+        "repo": "Reid-n0rc/future-electronics-mcp",
+        "ref": "master"
+      }
+    }
+  ]
+}
