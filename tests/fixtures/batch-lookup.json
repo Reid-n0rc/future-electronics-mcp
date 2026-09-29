@@ -1,0 +1,63 @@
+{
+  "lookup_parts": [
+    {
+      "part_number": "TEST-0000",
+      "lookup_results": "0 Offers found",
+      "offers": []
+    },
+    {
+      "part_number": "TEST-5678",
+      "lookup_results": "1 Offer found",
+      "offers": [
+        {
+          "_orbweaver_data": { "datasource_name": "Example Datasource" },
+          "part_id": {
+            "seller_part_number": "8888888",
+            "unit_weight": "1 oz",
+            "web_url": "https://example.com/p/8888888",
+            "mpn": "TEST-5678"
+          },
+          "part_attributes": [
+            { "name": "quantity_minimum", "value": 1 },
+            { "name": "web_view", "value": false },
+            { "name": "packageType", "value": "CUTT" },
+            { "name": "rohs", "value": "E" },
+            { "name": "dateCode", "value": "2524" },
+            { "name": "manufacturerName", "value": "Example Semiconductors" }
+          ],
+          "categories": [
+            { "id": "7", "name": "diodes", "subcategory_name": "schottky-diodes" }
+          ],
+          "documents": [
+            {
+              "type": "Datasheet",
+              "title": "TEST-5678 Datasheet",
+              "url": "https://example.com/docs/test-5678.pdf"
+            }
+          ],
+          "images": [
+            { "url": "https://example.com/img/test-5678.png", "type": "PNG" }
+          ],
+          "quantities": {
+            "quantity_available": 250,
+            "quantity_factory": 10000,
+            "quantity_minimum": 1,
+            "quantity_committed": 0,
+            "quantity_on_order": 0,
+            "factory_leadtime": "8",
+            "factory_leadtime_units": "Weeks",
+            "order_mult_qty": 1
+          },
+          "pricing": [
+            { "unit_price": 0.15, "quantity_from": 1, "quantity_to": 99 },
+            { "unit_price": 0.09, "quantity_from": 100, "quantity_to": null }
+          ],
+          "people_and_places": { "buyer_address_id": "Z9Z9Z9", "site": "EU" },
+          "pricing_type": "Contract",
+          "currency": { "currency_code": "EUR" },
+          "internal1": "FUTE"
+        }
+      ]
+    }
+  ]
+}
