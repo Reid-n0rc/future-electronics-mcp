@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "live-check": "tsx scripts/live-check.ts",
     "prepare": "git config core.hooksPath .githooks || true"
   },
   "license": "AGPL-3.0-or-later",
