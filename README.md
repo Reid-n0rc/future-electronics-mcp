@@ -65,8 +65,9 @@ npm test
 
 - `master` holds releases only. It changes **only** through pull requests from `dev`.
 - `dev` is the integration branch. It changes only through pull requests.
-- Every piece of work has a GitHub issue that includes a software plan. The
-  maintainer must approve the plan before anyone starts work on it.
+- Every piece of work has a GitHub issue. Anyone can file a bug report or
+  feature request without a plan, but before work starts the issue needs a
+  software plan, and the maintainer must approve it.
 - Every issue gets its own branch cut from `dev`, named
   `issue-<number>-<short-slug>`.
 
