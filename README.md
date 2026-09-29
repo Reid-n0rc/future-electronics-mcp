@@ -33,8 +33,33 @@ API documentation [[1]](#references).
 ## Install
 
 You need Node.js 22.12 or later and a Future Electronics license key (see
-[References](#references)). The repo does not commit `dist/`, so every install
-starts from a clone and a build:
+[References](#references)).
+
+### Claude Code (recommended)
+
+Run these two commands inside Claude Code:
+
+```
+/plugin marketplace add Reid-n0rc/future-electronics-mcp
+/plugin install future-electronics@future-electronics-mcp
+```
+
+Claude Code asks for your **Future Electronics API key during the install**
+(when the plugin is enabled).
+The input is masked, and Claude Code keeps the key in its secure storage (the
+OS keychain or credential store), never in a settings file or in this repo.
+The plugin passes it to the server as `FUTURE_API_KEY`. No clone, build, or
+`npm install` is needed: the plugin runs the self-contained bundle
+`server/future-electronics-mcp.mjs` with your `node`.
+
+The marketplace installs from the `master` branch, so you get released code
+only. To pick up a new release, run
+`/plugin marketplace update future-electronics-mcp`.
+
+### Developer install (from a clone)
+
+For development, or for MCP clients other than Claude Code, build from a
+clone:
 
 ```bash
 git clone https://github.com/Reid-n0rc/future-electronics-mcp.git
@@ -43,26 +68,12 @@ npm ci
 npm run build          # produces dist/index.js
 ```
 
-### Option A: Claude Code plugin
+To load your working copy as a plugin, run
+`claude --plugin-dir /path/to/future-electronics-mcp`. Claude Code then asks
+for the key the same way as a marketplace install. The plugin runs the
+committed bundle, so run `npm run bundle` after changing `src/`.
 
-The repo is a Claude Code plugin (`.claude-plugin/plugin.json`). The plugin
-starts `node ${CLAUDE_PLUGIN_ROOT}/dist/index.js` and passes your key through
-from the environment as `"FUTURE_API_KEY": "${FUTURE_API_KEY}"`. The key is
-never written to any file.
-
-```bash
-export FUTURE_API_KEY="…"   # never commit this, see SECURITY.md
-claude --plugin-dir /path/to/future-electronics-mcp
-```
-
-Export the key **before** starting Claude Code, because the plugin reads it
-from Claude Code's own environment. After pulling new changes, run
-`npm ci && npm run build` again.
-
-Installing through `/plugin install` from a marketplace is not supported yet:
-the repo has no marketplace manifest, and a git install would have no `dist/`.
-
-### Option B: `claude mcp add`
+Or register the built server directly with `claude mcp add`:
 
 ```bash
 claude mcp add future-electronics --scope user \
@@ -72,7 +83,7 @@ claude mcp add future-electronics --scope user \
 
 Your shell expands `$FUTURE_API_KEY`, so this copies the key's value into your
 Claude Code user config (`~/.claude.json`, outside this repo). If you would
-rather not store it there, use Option A. For other MCP clients, run
+rather not store it there, use the plugin install. For other MCP clients, run
 `node /path/to/future-electronics-mcp/dist/index.js` over stdio with
 `FUTURE_API_KEY` in its environment.
 
@@ -86,9 +97,10 @@ Check the connection with `claude mcp list`, or `/mcp` inside Claude Code.
 | `FUTURE_API_BASE_URL` | No               | Override the API origin (default `https://api.futureelectronics.com`). Must be `https`. |
 
 The server **starts without a key**. The key is read the first time a tool is
-called, and a missing key fails only that call, with a clear error. Keep the
-key in your environment or a secret manager (for example 1Password); never put
-it in a committed file.
+called, and a missing key fails only that call, with a clear error. With the
+plugin install, Claude Code sets `FUTURE_API_KEY` from the key you entered at
+install. Otherwise, keep the key in your environment or a secret manager (for
+example 1Password); never put it in a committed file.
 
 ## MCP tools
 
@@ -234,8 +246,8 @@ when it sends one.
 ## Troubleshooting
 
 - **`FUTURE_API_KEY is not set`.** The server started, but the key did not
-  reach it. For the plugin, export the key in the shell that launches Claude
-  Code, then restart Claude Code. For `claude mcp add`, remove and re-add the
+  reach it. For the plugin, make sure you entered a key at the install
+  prompt, then restart Claude Code. For `claude mcp add`, remove and re-add the
   server with `-e FUTURE_API_KEY=…` (`claude mcp get future-electronics` shows
   what is configured).
 - **401 (invalid key) or 406 (expired key).** Check for a typo, stray quotes,

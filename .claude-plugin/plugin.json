@@ -6,13 +6,24 @@
   "author": {
     "name": "Reid Crowe"
   },
+  "homepage": "https://github.com/Reid-n0rc/future-electronics-mcp#readme",
+  "repository": "https://github.com/Reid-n0rc/future-electronics-mcp",
   "license": "AGPL-3.0-or-later",
+  "userConfig": {
+    "future_api_key": {
+      "type": "string",
+      "title": "Future Electronics API key",
+      "description": "Your Future Electronics license key (request one at https://www.futureelectronics.com/api-solutions). Claude Code stores it in secure storage, never in a settings file.",
+      "required": true,
+      "sensitive": true
+    }
+  },
   "mcpServers": {
     "future-electronics": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/future-electronics-mcp.mjs"],
       "env": {
-        "FUTURE_API_KEY": "${FUTURE_API_KEY}"
+        "FUTURE_API_KEY": "${user_config.future_api_key}"
       }
     }
   }
