@@ -37,6 +37,8 @@ Product Information API. For the API summary and planned tools, see README.md.
    explicitly asks.
 7. **Sign commits when possible** (SSH or GPG signing). Signing is encouraged
    but not required by branch protection.
+8. **Test everything, and regress before merging or releasing.** See the
+   Testing policy below.
 
 ## Issue lifecycle
 
@@ -66,6 +68,34 @@ exceeding the context window**. Rules of thumb:
   small, trimmed fixtures.
 - If a task grows mid-flight, stop. Commit what is coherent, then open a
   follow-up issue with its own plan for approval instead of expanding scope.
+
+## Testing policy
+
+1. **Every implemented function has thorough tests.** Unit tests cover the
+   happy path, boundary and edge cases, invalid input, and every error path.
+   Tests use mocked HTTP and dummy keys, and they never require a real key or
+   network access. A PR that adds a function without tests is incomplete.
+2. **Every code change runs regression tests.** Before opening or updating a
+   PR, run the tests for the changed modules and everything that depends on
+   them, plus `npm run typecheck`. The PR must list the commands run and their
+   results. Fix regressions; never skip or delete a failing test to get
+   green.
+3. **Every release runs full regression, and it must pass.** Before a release,
+   run the complete suite from a clean install:
+   ```bash
+   npm ci && npm run typecheck && npm run build && npm test
+   ```
+   The maintainer also runs the opt-in live API check. If any part fails or is
+   skipped, there is no release.
+
+## Release process
+
+1. Open a PR from `dev` to `master`, titled `Release vX.Y.Z`.
+2. Paste the full regression output (see the Testing policy) into the PR. CI
+   must also be green.
+3. The maintainer reviews and merges the PR.
+4. Only the maintainer creates the tag and GitHub release, from `master`.
+   Agents never tag or release.
 
 ## Code conventions
 
