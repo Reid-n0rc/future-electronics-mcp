@@ -56,7 +56,7 @@ claude mcp add future-electronics -e FUTURE_API_KEY="$FUTURE_API_KEY" -- node /p
 
 ## Development
 
-The stack is TypeScript, Node.js 18 or later, `@modelcontextprotocol/sdk`, `zod`, and `vitest`.
+The stack is TypeScript, Node.js 22.12 or later, `@modelcontextprotocol/sdk`, `zod`, and `vitest`.
 
 ```bash
 npm install

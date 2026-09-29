@@ -10,7 +10,7 @@ This is an MCP server, written in TypeScript, that wraps the Future Electronics
 Product Information API. For the API summary and planned tools, see README.md.
 
 - API docs: <https://documenter.getpostman.com/view/18706946/UzBvFhcj>
-- Stack: Node.js 18 or later, TypeScript (ESM), `@modelcontextprotocol/sdk`,
+- Stack: Node.js 22.12 or later, TypeScript (ESM), `@modelcontextprotocol/sdk`,
   `zod`, and `vitest`
 - Commands: `npm run build`, `npm test`, and `npm run typecheck`
 
