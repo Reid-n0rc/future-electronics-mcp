@@ -8,7 +8,7 @@
     "future-electronics-mcp": "dist/index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12"
   },
   "scripts": {
     "build": "tsc",
