@@ -1,0 +1,95 @@
+#!/bin/sh
+# pre-commit: local guardrails (see AGENTS.md and SECURITY.md).
+#
+#  1. Refuse commits while on master or dev. Work happens on issue branches.
+#  2. Refuse staged .env / .env.* files. Only .env.example may be committed.
+#  3. Refuse staged added lines that assign a real-looking value to
+#     FUTURE_API_KEY or the x-orbweaver-licensekey header.
+#
+# Bypass with `git commit --no-verify` only if you are certain nothing secret
+# is staged.
+
+fail=0
+
+# --- 1. Protected branches ---------------------------------------------------
+branch=$(git symbolic-ref --short -q HEAD 2>/dev/null)
+case "$branch" in
+    master | dev)
+        echo "pre-commit: refusing to commit on $branch." >&2
+        echo "  Create a branch first: git switch -c issue-<n>-<slug> origin/dev" >&2
+        fail=1
+        ;;
+esac
+
+# --- 2. .env files -------------------------------------------------------------
+# Added, copied, modified, or renamed paths in the index.
+env_files=$(git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r path; do
+    name=${path##*/}
+    case "$name" in
+        (.env.example) ;;
+        (.env | .env.*) printf '%s\n' "$path" ;;
+    esac
+done)
+if [ -n "$env_files" ]; then
+    echo "pre-commit: refusing to commit .env files (only .env.example is allowed):" >&2
+    printf '%s\n' "$env_files" | sed 's/^/  /' >&2
+    fail=1
+fi
+
+# --- 3. Key assignments in added lines -----------------------------------------
+# How the scan works (deliberately simple):
+#  - Read the staged diff with zero context lines and look only at added
+#    lines ("+..."); removed and unchanged lines are ignored.
+#  - Find each FUTURE_API_KEY or x-orbweaver-licensekey (case-insensitive)
+#    that is followed by ":" or "=" (an optional closing quote in between is
+#    allowed), then take the value after it (optionally quoted).
+#  - Report the line only if the value looks like a real key: 8 or more
+#    characters drawn solely from [A-Za-z0-9_+/=-] and not a known dummy
+#    ("test-key", "your-key-here").
+#  - That lets placeholders through: $FUTURE_API_KEY, ${FUTURE_API_KEY},
+#    <value>, [APIkey], an ellipsis, and empty values.
+#  - A JS object key followed by an unquoted identifier, such as
+#    "x-orbweaver-licensekey": apiKey, is code rather than a literal, so it
+#    is also allowed. The value must be quoted in that form to be checked.
+# The offending value is never printed.
+key_hits=$(git diff --cached -U0 --no-color --no-ext-diff | awk '
+    BEGIN { q = "\047"; file = "" }
+    /^\+\+\+ / { file = substr($0, 5); sub(/^b\//, "", file); next }
+    /^\+/ {
+        line = substr($0, 2)
+        low = tolower(line)
+        while (match(low, /future_api_key|x-orbweaver-licensekey/)) {
+            name = substr(line, RSTART, RLENGTH)
+            line = substr(line, RSTART + RLENGTH)
+            low = substr(low, RSTART + RLENGTH)
+            s = line
+            closed_quote = 0
+            c = substr(s, 1, 1)
+            if (c == "\"" || c == q || c == "`") { closed_quote = 1; s = substr(s, 2) }
+            sub(/^[ \t]*/, "", s)
+            sep = substr(s, 1, 1)
+            if (sep != ":" && sep != "=") continue
+            s = substr(s, 2)
+            sub(/^[ \t]*/, "", s)
+            value_quoted = 0
+            c = substr(s, 1, 1)
+            if (c == "\"" || c == q || c == "`") { value_quoted = 1; s = substr(s, 2) }
+            if (closed_quote && sep == ":" && !value_quoted) continue
+            match(s, "^[^ \t\"" q "`,;)}]*")
+            value = substr(s, 1, RLENGTH)
+            if (value == "test-key" || value == "your-key-here") continue
+            if (length(value) >= 8 && value ~ /^[A-Za-z0-9_+\/=-]+$/) {
+                print "  " file ": " name " is set to a literal value"
+            }
+        }
+    }
+')
+if [ -n "$key_hits" ]; then
+    echo "pre-commit: refusing to commit what looks like a Future API key:" >&2
+    printf '%s\n' "$key_hits" >&2
+    echo "  Keys come only from the FUTURE_API_KEY environment variable (see SECURITY.md)." >&2
+    echo "  Use a placeholder such as \$FUTURE_API_KEY, test-key, or <value>." >&2
+    fail=1
+fi
+
+exit $fail

@@ -45,6 +45,29 @@ Product Information API. For the API summary and planned tools, see README.md.
 8. **Test everything, and regress before merging or releasing.** See the
    Testing policy below.
 
+## Local setup
+
+Enable the repo's git hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Once the npm scaffold lands (#2), `npm install` sets this automatically
+through the `prepare` script.
+
+- `pre-commit` blocks commits on `master` or `dev`, staged `.env` files
+  (except `.env.example`), and added lines that set `FUTURE_API_KEY` or
+  `x-orbweaver-licensekey` to a real-looking value.
+- `pre-push` blocks pushes to `master` or `dev`. Server-side protection
+  enforces this too. The maintainer-only emergency bypass is
+  `ALLOW_PROTECTED_PUSH=1`.
+- `.claude/settings.json` adds a Claude Code hook
+  (`.claude/hooks/guard-git-push.sh`, needs `jq`). It denies agent pushes to
+  `master` or `dev` and force pushes, except `--force-with-lease` on
+  `issue-*` branches.
+- Hook tests: `sh tests/hooks/run.sh`.
+
 ## Issue lifecycle
 
 Anyone can file a **Bug report** or **Feature request** without a plan. Those
