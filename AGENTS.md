@@ -20,9 +20,8 @@ Product Information API. For the API summary and planned tools, see README.md.
    comes only from `FUTURE_API_KEY` at runtime. Never write a real key into
    code, tests, fixtures, docs, commits, issues, or PRs, and never log one.
 2. **No work without an approved issue.** Every change must be tracked by a
-   GitHub issue that contains a software plan (use the "Task" issue template).
-   Do not start implementation until the maintainer (@Reid-n0rc) has approved
-   the plan. Approval means the issue has the `plan-approved` label. Issues
+   GitHub issue that contains a software plan. Do not start implementation
+   until the maintainer (@Reid-n0rc) has approved the plan. Approval means the issue has the `plan-approved` label. Issues
    labeled `plan-needs-approval` are **not** ready to work.
 3. **One branch per issue, based on `dev`.**
    ```bash
@@ -40,9 +39,14 @@ Product Information API. For the API summary and planned tools, see README.md.
 
 ## Issue lifecycle
 
-1. An agent or contributor opens an issue from the Task template. The issue
-   includes the goal, a software plan, the files it touches, a test plan,
-   acceptance criteria, and an out-of-scope section. The issue starts with the
+Anyone can file a **Bug report** or **Feature request** without a plan. Those
+templates are intake only, and filing one does not authorize work.
+
+1. Before anyone works an issue, it needs a software plan: the goal, the plan
+   steps, the files it touches, a test plan, acceptance criteria, and an
+   out-of-scope section. New implementation work uses the **Implementation
+   task** template. For an existing bug or feature request, add the plan to
+   that issue (or open a linked Implementation task). Then apply the
    `plan-needs-approval` label.
 2. The maintainer reviews the plan. They approve it by swapping the label to
    `plan-approved`, or they request changes in the comments.
