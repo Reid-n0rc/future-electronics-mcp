@@ -89,6 +89,25 @@ rather not store it there, use the plugin install. For other MCP clients, run
 
 Check the connection with `claude mcp list`, or `/mcp` inside Claude Code.
 
+## Claude Desktop
+
+Claude Desktop installs the server in one click from an MCP Bundle
+(`.mcpb`). It needs no clone, no build, and no separate Node.js install,
+because Claude Desktop ships its own Node.js runtime.
+
+1. Download `future-electronics-mcp.mcpb` from the latest
+   [release](https://github.com/Reid-n0rc/future-electronics-mcp/releases).
+2. Double-click the file, or drag it onto Claude Desktop (you can also use
+   **Settings → Extensions**). Claude Desktop shows an install dialog.
+3. Click **Install**, then enter your Future Electronics API key when asked.
+   Claude Desktop stores the key in its secure storage and passes it to the
+   server as `FUTURE_API_KEY`. The key is never written to the bundle or to
+   this repo.
+
+To change the key later, open **Settings → Extensions → Future Electronics
+Part Lookup**. To build the bundle yourself, run `npm ci && npm run pack:mcpb`.
+That writes `build/future-electronics-mcp.mcpb`.
+
 ## Configuration
 
 | Variable              | Required         | Purpose                                                                        |

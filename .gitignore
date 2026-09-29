@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# npm run pack:mcpb output. Never commit a .mcpb.
+build/
+*.mcpb
 coverage/
 *.log
 .DS_Store

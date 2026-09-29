@@ -1,0 +1,47 @@
+# Release: attach the Claude Desktop bundle (.mcpb) to a published GitHub
+# release (issue #34).
+#
+# Runs only when the maintainer publishes a release. It builds the .mcpb from
+# the tagged commit and uploads it as a release asset. The only credential is
+# the built-in GITHUB_TOKEN, with contents: write on this one job. No
+# repository secrets are used, and no key goes into the bundle.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  mcpb:
+    name: Attach .mcpb to the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release upload
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      # Fail before building if mcpb/manifest.json (and package.json) do not
+      # carry the tag's version, e.g. tag v1.2.3 needs version 1.2.3.
+      - name: Check manifest version matches the tag
+        run: node scripts/pack-mcpb.mjs --check-tag "$TAG"
+      - run: npm ci
+      - run: npm run pack:mcpb
+      - name: Upload .mcpb to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" build/future-electronics-mcp.mcpb --clobber --repo "$GITHUB_REPOSITORY"

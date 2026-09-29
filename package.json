@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "live-check": "tsx scripts/live-check.ts",
     "prepare": "git config core.hooksPath .githooks || true",
-    "bundle": "node scripts/bundle.mjs"
+    "bundle": "node scripts/bundle.mjs",
+    "pack:mcpb": "node scripts/pack-mcpb.mjs"
   },
   "license": "AGPL-3.0-or-later",
   "dependencies": {

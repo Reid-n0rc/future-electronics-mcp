@@ -74,3 +74,25 @@ jobs:
       # The committed server/ bundle must match a fresh build of src/. If this
       # fails, run `npm run bundle` and commit the result.
       - run: git diff --exit-code server/
+
+  mcpb:
+    name: Claude Desktop bundle (.mcpb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      # Validates mcpb/manifest.json with the pinned mcpb CLI and packs
+      # build/future-electronics-mcp.mcpb, so a broken manifest fails the PR.
+      - run: npm run pack:mcpb
+      # For manual testing: download it from the run's Artifacts section and
+      # open it in Claude Desktop. The artifact is a zip that contains the .mcpb.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: future-electronics-mcp-mcpb
+          path: build/future-electronics-mcp.mcpb
+          if-no-files-found: error
+          retention-days: 14
