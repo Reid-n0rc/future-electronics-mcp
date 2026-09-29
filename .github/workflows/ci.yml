@@ -29,8 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # engines allows >=18, but Node 18 is EOL, so CI covers 20, 22, and 24.
-        node-version: [20.x, 22.x, 24.x]
+        # engines is >=22.12 (vitest ^5 requires it; Node 18/20 are EOL).
+        node-version: [22.x, 24.x]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
