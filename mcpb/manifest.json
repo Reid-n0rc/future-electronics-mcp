@@ -1,0 +1,55 @@
+{
+  "manifest_version": "0.3",
+  "name": "future-electronics-mcp",
+  "display_name": "Future Electronics Part Lookup",
+  "version": "0.1.0",
+  "description": "Look up Future Electronics parts, stock, lead times, and price breaks by manufacturer part number.",
+  "long_description": "An MCP server for the Future Electronics Product Information API. It looks up one part or a whole bill of materials by manufacturer part number and returns stock, lead time, and price breaks. Pricing matches the Future website and is not an official quote. You need a Future Electronics API license key.",
+  "author": {
+    "name": "Reid Crowe",
+    "url": "https://github.com/Reid-n0rc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Reid-n0rc/future-electronics-mcp.git"
+  },
+  "homepage": "https://github.com/Reid-n0rc/future-electronics-mcp",
+  "support": "https://github.com/Reid-n0rc/future-electronics-mcp/issues",
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["electronics", "components", "bom", "pricing", "future-electronics"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/future-electronics-mcp.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/future-electronics-mcp.mjs"],
+      "env": {
+        "FUTURE_API_KEY": "${user_config.future_api_key}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "future_lookup_part",
+      "description": "Look up one part by manufacturer part number: stock, lead time, and price breaks."
+    },
+    {
+      "name": "future_lookup_parts",
+      "description": "Look up many parts at once, such as a BOM, with the best offer and price for each."
+    }
+  ],
+  "compatibility": {
+    "runtimes": {
+      "node": ">=18"
+    }
+  },
+  "user_config": {
+    "future_api_key": {
+      "type": "string",
+      "title": "Future Electronics API key",
+      "description": "Your Future Electronics license key, from https://www.futureelectronics.com/api-solutions. Claude Desktop stores it securely.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

@@ -123,6 +123,8 @@ exceeding the context window**. Rules of thumb:
 ## Release process
 
 1. Open a PR from `dev` to `master`, titled `Release vX.Y.Z`.
+   The `mcpb/manifest.json` version must match `package.json` (and the tag),
+   or the release workflow fails and no `.mcpb` is attached.
 2. Paste the full regression output (see the Testing policy) into the PR. CI
    must also be green.
 3. The maintainer reviews and merges the PR.
