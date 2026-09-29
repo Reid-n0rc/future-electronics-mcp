@@ -25,13 +25,26 @@ documentation example.
 2. Remove the key from history (`git filter-repo` or BFG) and force-push. This
    is the one allowed exception to the PR-only rule, and it requires the
    maintainer's action.
-3. Open an issue that records the incident without including the key itself.
+3. Record the incident in a private security advisory, or in an issue if
+   nothing sensitive remains. Never include the key itself.
 
 ## Reporting a vulnerability
 
-This repository is private. Report vulnerabilities directly to the maintainer
-(@Reid-n0rc) through a private channel or a GitHub security advisory on this
-repository. Do not report them in a public issue.
+This repository uses **GitHub private vulnerability reporting**. To report a
+vulnerability:
+
+1. Open the repository's **Security** tab and click **Report a vulnerability**,
+   or go directly to
+   <https://github.com/Reid-n0rc/future-electronics-mcp/security/advisories/new>.
+2. Include the affected version or commit, reproduction steps, and the
+   impact. **Never include a real API key.** Use placeholders instead.
+
+**Do not** report vulnerabilities in public issues, pull requests, or
+discussions.
+
+The maintainer aims to acknowledge reports within 7 days. Fixes are
+coordinated privately and disclosed through a GitHub Security Advisory once a
+fixed release is available. Reporters are credited unless they ask not to be.
 
 ## Supported versions
 
