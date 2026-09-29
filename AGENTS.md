@@ -53,8 +53,7 @@ Enable the repo's git hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-Once the npm scaffold lands (#2), `npm install` sets this automatically
-through the `prepare` script.
+`npm install` also sets this automatically through the `prepare` script.
 
 - `pre-commit` blocks commits on `master` or `dev`, staged `.env` files
   (except `.env.example`), and added lines that set `FUTURE_API_KEY` or
