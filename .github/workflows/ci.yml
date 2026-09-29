@@ -59,3 +59,18 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bundle:
+    name: Bundle is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run bundle
+      # The committed server/ bundle must match a fresh build of src/. If this
+      # fails, run `npm run bundle` and commit the result.
+      - run: git diff --exit-code server/

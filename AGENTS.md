@@ -133,6 +133,9 @@ exceeding the context window**. Rules of thumb:
 
 - Put source in `src/` and tests in `tests/`, and mirror module names between
   them.
+- Any change under `src/` must be followed by `npm run bundle`, with the
+  updated `server/future-electronics-mcp.mjs` committed in the same PR. CI fails
+  if the committed bundle is out of date.
 - Validate every tool input with `zod`, and map every upstream error code to a
   clear message (see README.md).
 - Mock HTTP in unit tests. Tests must never require a real key or network
