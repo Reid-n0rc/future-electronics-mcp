@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Secrets — never commit keys (see SECURITY.md)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
