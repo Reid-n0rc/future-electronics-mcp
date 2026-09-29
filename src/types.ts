@@ -22,7 +22,7 @@ import { z } from "zod";
 /** Optional and nullable: the field may be missing or `null`. */
 const opt = <T extends z.ZodTypeAny>(schema: T) => schema.optional().nullable();
 
-/** `lookup_type` query parameter (and its echo in the response). */
+/** `lookup_type` request parameter. Strict: only these values may be sent. */
 export const LookupTypeSchema = z.enum(["default", "exact", "contains", "starts_with"]);
 export type LookupType = z.infer<typeof LookupTypeSchema>;
 
@@ -175,7 +175,8 @@ export const PartLookupResponseSchema = z
     /** Echo of the requested part number. */
     lookup_value: opt(z.string()),
     /** Echo of the requested lookup type. */
-    lookup_type: opt(LookupTypeSchema),
+    // Response echo is lenient: an unexpected value/casing must not break parsing.
+    lookup_type: opt(z.string()),
     /** Summary message, e.g. "1 Offer found". */
     lookup_results: opt(z.string()),
     /** Required. Empty when nothing matched. */

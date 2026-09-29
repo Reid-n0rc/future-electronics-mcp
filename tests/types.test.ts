@@ -73,8 +73,13 @@ describe("LookupTypeSchema", () => {
 });
 
 describe("PartLookupResponseSchema", () => {
-  it("rejects an unknown lookup_type", () => {
-    const payload = { ...clone(single), lookup_type: "fuzzy" };
+  it("accepts an unexpected lookup_type echo (lenient response parsing)", () => {
+    const payload = { ...clone(single), lookup_type: "EXACT" };
+    expect(PartLookupResponseSchema.parse(payload).lookup_type).toBe("EXACT");
+  });
+
+  it("rejects a non-string lookup_type echo", () => {
+    const payload = { ...clone(single), lookup_type: 42 };
     expect(PartLookupResponseSchema.safeParse(payload).success).toBe(false);
   });
 
