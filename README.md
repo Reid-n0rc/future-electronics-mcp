@@ -72,3 +72,12 @@ npm test
 
 See [AGENTS.md](AGENTS.md) for the full process and [SECURITY.md](SECURITY.md)
 for key handling.
+
+## License
+
+Copyright (C) 2026 Reid Crowe
+
+Licensed under the [GNU Affero General Public License v3.0 or later](LICENSE)
+(`AGPL-3.0-or-later`). If you run a modified version of this server and let
+users interact with it over a network, you must make your modified source
+available to those users.
