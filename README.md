@@ -13,6 +13,9 @@ inventory, lead times, documents, and images by manufacturer part number.
 
 ## Upstream API
 
+The details in this section are summarized from the official Future Electronics
+API documentation [[1]](#references).
+
 | Search   | Method | Endpoint                                                        |
 |----------|--------|-----------------------------------------------------------------|
 | Single   | GET    | `https://api.futureelectronics.com/api/v1/pim-future/lookup`    |
@@ -75,6 +78,24 @@ npm test
 
 See [AGENTS.md](AGENTS.md) for the full process and [SECURITY.md](SECURITY.md)
 for key handling.
+
+## References
+
+1. Future Electronics. *Future Electronics API's* (Postman API documentation).
+   <https://documenter.getpostman.com/view/18706946/UzBvFhcj>. Accessed
+   2026-09-29.
+2. Future Electronics. *API Solutions* (API key requests).
+   <https://www.futureelectronics.com/api-solutions>.
+
+## Disclaimer
+
+This is an unofficial, community project. It is **not affiliated with,
+endorsed by, or supported by Future Electronics**. "Future Electronics" is used
+only to identify the API this server connects to, and any trademarks belong to
+their owners. API behavior, endpoints, and field definitions are summarized
+from the documentation cited above. If anything here conflicts with that
+documentation, the documentation is authoritative. Pricing returned by the API
+is not an official quote.
 
 ## License
 

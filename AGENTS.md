@@ -109,6 +109,10 @@ exceeding the context window**. Rules of thumb:
   clear message (see README.md).
 - Mock HTTP in unit tests. Tests must never require a real key or network
   access.
+- Any code derived from the Future API documentation must cite it in a header
+  comment, for example `src/types.ts` and the error mapping in
+  `src/client.ts`. Use:
+  `// Source: Future Electronics API docs, https://documenter.getpostman.com/view/18706946/UzBvFhcj`
 - Keep the upstream response shape documented in `src/types.ts`. Tools should
   return compact, LLM-friendly summaries with an option to include the raw
   data.
