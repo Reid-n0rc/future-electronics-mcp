@@ -70,6 +70,8 @@ npm test
   software plan, and the maintainer must approve it.
 - Every issue gets its own branch cut from `dev`, named
   `issue-<number>-<short-slug>`.
+- Every function has thorough tests. Every code change runs regression tests,
+  and a release ships only after the full regression suite passes.
 
 See [AGENTS.md](AGENTS.md) for the full process and [SECURITY.md](SECURITY.md)
 for key handling.
