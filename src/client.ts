@@ -248,14 +248,17 @@ export class FutureClient {
     for (let attempt = 1; ; attempt++) {
       const res = await this.#limiter.run(() => this.#send(url, init), resumeAt);
       if (res.ok) return this.#parseSuccess(res.text, schema, label);
-      if (res.status === 429 && attempt <= this.#maxRetries) {
+      if (res.status === 429) {
         const now = this.#now();
         const delay = retryDelayMs(res.retryAfter, attempt, now);
-        // Server-wide cooldown: no new request starts until it passes.
+        // Server-wide cooldown on every 429, including the final one, so
+        // other callers back off even when this request gives up.
         resumeAt = now + delay;
         this.#limiter.pauseUntil(resumeAt);
-        await this.#sleep(delay);
-        continue;
+        if (attempt <= this.#maxRetries) {
+          await this.#sleep(delay);
+          continue;
+        }
       }
       throw this.#httpError(res);
     }

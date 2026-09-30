@@ -777,6 +777,44 @@ describe("rate limiting", () => {
     await expect(Promise.all([a, c])).resolves.toHaveLength(2);
   });
 
+  it("still pauses other callers after a final 429 that is not retried", async () => {
+    let time = 0;
+    const timers: Array<{ at: number; resolve: () => void }> = [];
+    const sleep = vi.fn(
+      (ms: number) => new Promise<void>((resolve) => timers.push({ at: time + ms, resolve })),
+    );
+    const advance = async (ms: number) => {
+      time += ms;
+      for (const t of timers.filter((t) => t.at <= time)) {
+        timers.splice(timers.indexOf(t), 1);
+        t.resolve();
+      }
+      await flush();
+    };
+    const gate = gatedFetch();
+    const client = new FutureClient({
+      apiKey: KEY,
+      fetch: gate.fetchMock,
+      sleep,
+      now: () => time,
+      maxRetries: 0,
+    });
+
+    const a = catchError(client.lookup("AAA"));
+    await flush();
+    gate.pending.shift()!(response(429, "", { "Retry-After": "3" }));
+    expect((await a).status).toBe(429); // no retries left: A fails immediately
+
+    const b = client.lookup("BBB");
+    await flush();
+    await advance(2999);
+    expect(gate.fetchMock).toHaveBeenCalledTimes(1); // B waits out A's cooldown
+    await advance(1);
+    expect(gate.fetchMock).toHaveBeenCalledTimes(2);
+    gate.pending.shift()!(response(200, partFixture));
+    await expect(b).resolves.toBeDefined();
+  });
+
   it("honors an HTTP-date Retry-After on retry", async () => {
     const now = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");
     const { client, sleep } = setup(
