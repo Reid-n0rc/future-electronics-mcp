@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -28,7 +30,9 @@ import {
   partsTable,
   poolSize,
   problemReasons,
+  lookupPartsInputSchema,
   registerLookupPartsTool,
+  resolveParts,
   type PartResult,
 } from "../../src/tools/lookupParts.js";
 import type { BatchLookupResponse, Offer, PartLookupResponse } from "../../src/types.js";
@@ -1337,5 +1341,170 @@ describe("future_lookup_parts problems-first summary", () => {
     const text = (res.content[0] as { text: string }).text;
     expect(text.length).toBeLessThanOrEqual(4000);
     expect(JSON.parse(text).truncated.omitted).toBeGreaterThan(0);
+  });
+});
+
+// ---------- bom_file (issue #43) ----------
+
+describe("bom_file input", () => {
+  let base: string;
+  let ws: string;
+  beforeEach(() => {
+    base = realpathSync(mkdtempSync(join(tmpdir(), "fe-bomlookup-")));
+    ws = join(base, "ws");
+    mkdirSync(ws);
+    vi.stubEnv("FUTURE_WORKSPACE_DIR", ws);
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+  const put = (name: string, content: string) => writeFileSync(join(ws, name), content);
+  const errorText = async (args: Record<string, unknown>) => {
+    const stub = stubClient();
+    const { res, text } = await call(providerFor(stub), args);
+    expect(res.isError).toBe(true);
+    expect(text).not.toContain(base);
+    expect(stub.batchLookup).not.toHaveBeenCalled();
+    return text;
+  };
+
+  it("looks up a workspace CSV end to end, echoing the source", async () => {
+    put("bom.csv", "Ref,MPN,Qty\r\nR1,LM317T,10\r\nR2,lm317t,5\r\nR3,MISS-1,\r\nR4,,3\r\n");
+    const stub = stubClient();
+    const { res, json } = await call(providerFor(stub), { bom_file: { path: "bom.csv" }, detail: "all" });
+    expect(res.isError).toBeFalsy();
+    expect(stub.batchLookup).toHaveBeenCalledWith(["LM317T", "MISS-1"]);
+    expect(json.source).toEqual({
+      file: "bom.csv", rows_read: 4, rows_skipped: 1, part_column: "MPN", quantity_column: "Qty",
+    });
+    expect(json.totals).toMatchObject({ requested: 3, unique: 2, found: 1, not_found: 1 });
+    const rows = allParts(json);
+    expect(rows[0]).toMatchObject({ part_number: "LM317T", quantity: 15 });
+    expect(rows[1]).toMatchObject({ part_number: "MISS-1", quantity: DEFAULT_QUANTITY });
+  });
+
+  it("echoes the source in raw output too, and never for inline parts", async () => {
+    put("bom.csv", "mpn\nLM317T\n");
+    const raw = await call(providerFor(stubClient()), { bom_file: { path: "bom.csv" }, raw: true });
+    expect(raw.json.source.part_column).toBe("mpn");
+    const inline = await call(providerFor(stubClient()), { parts: ["LM317T"] });
+    expect(inline.json).not.toHaveProperty("source");
+  });
+
+  it("passes column options through the MCP schema", async () => {
+    put("bom.tsv", "LM317T\t4\n");
+    const stub = stubClient();
+    const { json } = await call(providerFor(stub), {
+      bom_file: { path: "bom.tsv", has_header: false, quantity_column: 2 },
+      detail: "all",
+    });
+    expect(json.source).toMatchObject({ part_column: "column 1", quantity_column: "column 2" });
+    expect(allParts(json)[0]).toMatchObject({ part_number: "LM317T", quantity: 4 });
+  });
+
+  it("rejects parts and bom_file together, and neither", async () => {
+    put("bom.csv", "mpn\nLM317T\n");
+    expect(await errorText({ parts: ["LM317T"], bom_file: { path: "bom.csv" } })).toBe(
+      "Give exactly one of parts or bom_file.",
+    );
+    expect(await errorText({})).toBe("Give exactly one of parts or bom_file.");
+  });
+
+  it("refines the exported schema the same way", () => {
+    expect(lookupPartsInputSchema.safeParse({ parts: ["A"] }).success).toBe(true);
+    expect(lookupPartsInputSchema.safeParse({ bom_file: { path: "b.csv" } }).success).toBe(true);
+    for (const bad of [{}, { parts: ["A"], bom_file: { path: "b.csv" } }, { parts: [] }]) {
+      expect(lookupPartsInputSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("reports bad quantities by row, validated like inline quantities", async () => {
+    put("bom.csv", "mpn,qty\nA1,1\nB2,0\nC3,-4\nD4,1.5\nE5,abc\nF6,1000000001\nG7,2.0\n");
+    expect(await errorText({ bom_file: { path: "bom.csv" } })).toBe(
+      'Invalid quantity in row 3 ("0"), row 4 ("-4"), row 5 ("1.5"), row 6 ("abc"), row 7 ("1000000001"). ' +
+        "A quantity must be a whole number from 1 to 1000000000, or empty.",
+    );
+  });
+
+  it("caps the list of bad rows", async () => {
+    put("bom.csv", "mpn,qty\n" + Array.from({ length: 13 }, (_, i) => `P${i}X,x`).join("\n"));
+    expect(await errorText({ bom_file: { path: "bom.csv" } })).toMatch(/row 11 \("x"\), and 3 more\./);
+  });
+
+  it("accepts a whole-number quantity written with decimals", async () => {
+    put("bom.csv", "mpn,qty\nLM317T,100.00\n");
+    const { json } = await call(providerFor(stubClient()), { bom_file: { path: "bom.csv" }, detail: "all" });
+    expect(allParts(json)[0].quantity).toBe(100);
+  });
+
+  it("applies the part limit after dedupe", async () => {
+    const names = partNames(MAX_LOOKUP_PARTS);
+    put("ok.csv", "mpn\n" + [...names, ...names.map((n) => n.toLowerCase())].join("\n"));
+    put("big.csv", "mpn\n" + partNames(MAX_LOOKUP_PARTS + 1).join("\n"));
+    const ok = await call(providerFor(stubClient()), { bom_file: { path: "ok.csv" } });
+    expect(ok.json.totals).toMatchObject({ requested: 4000, unique: MAX_LOOKUP_PARTS });
+    expect(await errorText({ bom_file: { path: "big.csv" } })).toBe(
+      `The file has ${MAX_LOOKUP_PARTS + 1} unique part numbers; the limit is ${MAX_LOOKUP_PARTS}. Split the file.`,
+    );
+  });
+
+  it("rejects a file with no part numbers", async () => {
+    put("bom.csv", "mpn,qty\n,1\n");
+    expect(await errorText({ bom_file: { path: "bom.csv" } })).toBe(
+      'No part numbers found in "bom.csv" (1 rows read, 1 skipped).',
+    );
+  });
+
+  it("gives clear, path-free errors for file problems", async () => {
+    mkdirSync(join(base, "out"));
+    writeFileSync(join(base, "out", "x.csv"), "mpn\nSECRET\n");
+    put("bad.csv", "Ref\nR1\n");
+    expect(await errorText({ bom_file: { path: "nope.csv" } })).toMatch(/^"nope\.csv" was not found/);
+    expect(await errorText({ bom_file: { path: "bom.xlsx" } })).toMatch(/is not a \.csv or \.tsv file/);
+    expect(await errorText({ bom_file: { path: "../out/x.csv" } })).toMatch(/is outside the workspace folder/);
+    expect(await errorText({ bom_file: { path: join(base, "out", "x.csv") } })).toMatch(/^"x\.csv" is outside/);
+    expect(await errorText({ bom_file: { path: "bad.csv" } })).toMatch(/Headers found: "Ref"/);
+  });
+
+  it.skipIf(process.platform === "win32")("rejects a symlink escaping the workspace", async () => {
+    mkdirSync(join(base, "out"));
+    writeFileSync(join(base, "out", "x.csv"), "mpn\nSECRET\n");
+    symlinkSync(join(base, "out", "x.csv"), join(ws, "link.csv"));
+    expect(await errorText({ bom_file: { path: "link.csv" } })).toMatch(/^"link\.csv" is outside the workspace folder/);
+  });
+
+  it("rejects an invalid FUTURE_WORKSPACE_DIR", async () => {
+    vi.stubEnv("FUTURE_WORKSPACE_DIR", "relative/dir");
+    expect(await errorText({ bom_file: { path: "bom.csv" } })).toBe("FUTURE_WORKSPACE_DIR must be an absolute path.");
+  });
+
+  it("rejects a malformed bom_file through the schema", async () => {
+    const { res } = await call(providerFor(stubClient()), { bom_file: { path: "b.csv", delimiter: "|" } });
+    expect(res.isError).toBe(true);
+  });
+
+  it("lists bom_file in the tool schema", async () => {
+    const conn = await connect(providerFor(stubClient()));
+    open.push(conn);
+    const { tools } = await conn.client.listTools();
+    const tool = tools.find((t) => t.name === LOOKUP_PARTS_TOOL_NAME)!;
+    expect(tool.inputSchema.properties).toHaveProperty("bom_file");
+    expect(tool.inputSchema.required ?? []).not.toContain("parts");
+    expect(tool.description).toMatch(/bom_file/);
+  });
+
+  it("resolveParts returns inline parts unchanged and reads files from an explicit root", async () => {
+    expect(await resolveParts({ parts: ["A"] })).toEqual({ items: ["A"] });
+    put("bom.csv", "mpn,qty\nLM317T,2\n");
+    const other = join(base, "other");
+    mkdirSync(other);
+    writeFileSync(join(other, "bom.csv"), "mpn\nOTHER1\n");
+    expect(await resolveParts({ bom_file: { path: "bom.csv" } }, other)).toMatchObject({
+      items: [{ part_number: "OTHER1" }],
+    });
+    expect(await resolveParts({ bom_file: { path: "bom.csv" } })).toMatchObject({
+      items: [{ part_number: "LM317T", quantity: 2 }],
+      source: { file: "bom.csv" },
+    });
   });
 });
