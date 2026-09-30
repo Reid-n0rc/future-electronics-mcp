@@ -1,18 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { ConfigError, DEFAULT_BASE_URL, loadConfig, validateBaseUrl } from "../src/config.js";
+import {
+  ConfigError,
+  DEFAULT_BASE_URL,
+  MAX_CONCURRENCY_DEFAULT,
+  MIN_REQUEST_INTERVAL_DEFAULT_MS,
+  loadConfig,
+  parseIntSetting,
+  validateBaseUrl,
+} from "../src/config.js";
 
 describe("loadConfig", () => {
   it("reads the key and uses the default base URL", () => {
     expect(loadConfig({ FUTURE_API_KEY: "test-key" })).toEqual({
       apiKey: "test-key",
       baseUrl: DEFAULT_BASE_URL,
+      maxConcurrency: 4,
+      minRequestIntervalMs: 0,
     });
   });
 
   it("trims the key and honors FUTURE_API_BASE_URL", () => {
     expect(
       loadConfig({ FUTURE_API_KEY: "  test-key\n", FUTURE_API_BASE_URL: " https://example.test/ " }),
-    ).toEqual({ apiKey: "test-key", baseUrl: "https://example.test" });
+    ).toMatchObject({ apiKey: "test-key", baseUrl: "https://example.test" });
   });
 
   it("falls back to the default when FUTURE_API_BASE_URL is blank", () => {
@@ -80,5 +90,79 @@ describe("validateBaseUrl", () => {
     } catch (error) {
       expect((error as Error).message).not.toContain("test-key");
     }
+  });
+});
+
+describe("rate limit settings", () => {
+  const load = (extra: Record<string, string>) => loadConfig({ FUTURE_API_KEY: "test-key", ...extra });
+
+  it("defaults to 4 in flight and no pacing", () => {
+    expect(MAX_CONCURRENCY_DEFAULT).toBe(4);
+    expect(MIN_REQUEST_INTERVAL_DEFAULT_MS).toBe(0);
+    expect(load({})).toMatchObject({ maxConcurrency: 4, minRequestIntervalMs: 0 });
+  });
+
+  it("treats blank values as unset", () => {
+    expect(
+      load({ FUTURE_MAX_CONCURRENCY: "  ", FUTURE_MIN_REQUEST_INTERVAL_MS: "" }),
+    ).toMatchObject({ maxConcurrency: 4, minRequestIntervalMs: 0 });
+  });
+
+  it.each([
+    ["1", 1],
+    ["32", 32],
+    [" 8 ", 8],
+    ["04", 4],
+  ])("accepts FUTURE_MAX_CONCURRENCY=%j", (raw, expected) => {
+    expect(load({ FUTURE_MAX_CONCURRENCY: raw }).maxConcurrency).toBe(expected);
+  });
+
+  it.each([
+    ["0", 0],
+    ["60000", 60_000],
+    ["250", 250],
+  ])("accepts FUTURE_MIN_REQUEST_INTERVAL_MS=%j", (raw, expected) => {
+    expect(load({ FUTURE_MIN_REQUEST_INTERVAL_MS: raw }).minRequestIntervalMs).toBe(expected);
+  });
+
+  it.each(["0", "33", "-1", "1.5", "4e0", "abc", "0x4", "+4", "99999999999999999999"])(
+    "rejects FUTURE_MAX_CONCURRENCY=%j",
+    (raw) => {
+      expect(() => load({ FUTURE_MAX_CONCURRENCY: raw })).toThrow(ConfigError);
+      expect(() => load({ FUTURE_MAX_CONCURRENCY: raw })).toThrow(
+        "FUTURE_MAX_CONCURRENCY must be an integer from 1 to 32.",
+      );
+    },
+  );
+
+  it.each(["-1", "60001", "2.5", "fast", "1_000"])(
+    "rejects FUTURE_MIN_REQUEST_INTERVAL_MS=%j",
+    (raw) => {
+      expect(() => load({ FUTURE_MIN_REQUEST_INTERVAL_MS: raw })).toThrow(
+        "FUTURE_MIN_REQUEST_INTERVAL_MS must be an integer from 0 to 60000.",
+      );
+    },
+  );
+
+  it("never echoes the raw value or the key", () => {
+    try {
+      load({ FUTURE_MAX_CONCURRENCY: "test-key" });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      expect(String((error as Error).stack)).not.toContain("test-key");
+    }
+  });
+});
+
+describe("parseIntSetting", () => {
+  it("returns the fallback for undefined", () => {
+    expect(parseIntSetting(undefined, "X", 7, 0, 10)).toBe(7);
+  });
+  it("accepts both bounds and rejects just outside them", () => {
+    expect(parseIntSetting("2", "X", 7, 2, 5)).toBe(2);
+    expect(parseIntSetting("5", "X", 7, 2, 5)).toBe(5);
+    expect(() => parseIntSetting("1", "X", 7, 2, 5)).toThrow("X must be an integer from 2 to 5.");
+    expect(() => parseIntSetting("6", "X", 7, 2, 5)).toThrow(ConfigError);
   });
 });

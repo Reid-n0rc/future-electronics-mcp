@@ -10,6 +10,7 @@
 
 import type { z } from "zod";
 import { ConfigError, DEFAULT_BASE_URL, validateBaseUrl } from "./config.js";
+import { RateLimiter } from "./rateLimit.js";
 import {
   BatchLookupResponseSchema,
   ErrorResponseSchema,
@@ -131,15 +132,24 @@ export function validateBatch(parts: unknown): string[] {
 }
 
 /**
- * Delay before the next attempt: `Retry-After` in seconds when it is a valid
- * number, otherwise exponential backoff. Always capped at MAX_RETRY_DELAY_MS.
+ * Delay before the next attempt. `Retry-After` is honored as delay-seconds or
+ * as an HTTP-date (RFC 9110; a date in the past means no wait). Anything else
+ * falls back to exponential backoff. Always capped at MAX_RETRY_DELAY_MS.
  */
-export function retryDelayMs(retryAfter: string | null, attempt: number): number {
-  const seconds = retryAfter === null || retryAfter.trim() === "" ? NaN : Number(retryAfter);
-  const delay =
-    Number.isFinite(seconds) && seconds >= 0
-      ? seconds * 1000
-      : BASE_BACKOFF_MS * 2 ** (attempt - 1);
+export function retryDelayMs(
+  retryAfter: string | null,
+  attempt: number,
+  now: number = Date.now(),
+): number {
+  const value = retryAfter?.trim() ?? "";
+  let delay = BASE_BACKOFF_MS * 2 ** (attempt - 1);
+  const seconds = value === "" ? NaN : Number(value);
+  if (Number.isFinite(seconds)) {
+    if (seconds >= 0) delay = seconds * 1000;
+  } else if (/[A-Za-z]/.test(value)) {
+    const date = Date.parse(value);
+    if (Number.isFinite(date)) delay = Math.max(0, date - now);
+  }
   return Math.min(delay, MAX_RETRY_DELAY_MS);
 }
 
@@ -151,6 +161,12 @@ export interface FutureClientOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Retries after the first attempt on HTTP 429. Default 2 (3 attempts total). */
   maxRetries?: number;
+  /** Most requests in flight at once from this client. Default 4. */
+  maxConcurrency?: number;
+  /** Minimum gap between request starts, in ms. Default 0 (no pacing). */
+  minRequestIntervalMs?: number;
+  /** Clock in ms, used for pacing and 429 cooldowns. Default `Date.now`. */
+  now?: () => number;
 }
 
 interface RawResponse {
@@ -169,6 +185,8 @@ export class FutureClient {
   readonly #fetch: typeof fetch;
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #maxRetries: number;
+  readonly #now: () => number;
+  readonly #limiter: RateLimiter;
 
   constructor(options: FutureClientOptions) {
     const apiKey = typeof options?.apiKey === "string" ? options.apiKey.trim() : "";
@@ -187,6 +205,18 @@ export class FutureClient {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#sleep = options.sleep ?? defaultSleep;
     this.#maxRetries = maxRetries;
+    this.#now = options.now ?? Date.now;
+    this.#limiter = new RateLimiter({
+      maxConcurrency: options.maxConcurrency,
+      minIntervalMs: options.minRequestIntervalMs,
+      now: this.#now,
+      sleep: this.#sleep,
+    });
+  }
+
+  /** Most requests this client sends to the Future API at once. */
+  get maxConcurrency(): number {
+    return this.#limiter.maxConcurrency;
   }
 
   /** GET /lookup. `lookup_type` is sent only when provided. */
@@ -212,12 +242,23 @@ export class FutureClient {
     schema: S,
     label: string,
   ): Promise<z.infer<S>> {
+    // Each attempt holds a limiter slot only while its HTTP exchange runs;
+    // `run()` frees it on success and on every error.
+    let resumeAt: number | undefined;
     for (let attempt = 1; ; attempt++) {
-      const res = await this.#send(url, init);
+      const res = await this.#limiter.run(() => this.#send(url, init), resumeAt);
       if (res.ok) return this.#parseSuccess(res.text, schema, label);
-      if (res.status === 429 && attempt <= this.#maxRetries) {
-        await this.#sleep(retryDelayMs(res.retryAfter, attempt));
-        continue;
+      if (res.status === 429) {
+        const now = this.#now();
+        const delay = retryDelayMs(res.retryAfter, attempt, now);
+        // Server-wide cooldown on every 429, including the final one, so
+        // other callers back off even when this request gives up.
+        resumeAt = now + delay;
+        this.#limiter.pauseUntil(resumeAt);
+        if (attempt <= this.#maxRetries) {
+          await this.#sleep(delay);
+          continue;
+        }
       }
       throw this.#httpError(res);
     }

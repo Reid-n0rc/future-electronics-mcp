@@ -11,7 +11,19 @@ export const DEFAULT_BASE_URL = "https://api.futureelectronics.com";
 export interface FutureConfig {
   apiKey: string;
   baseUrl: string;
+  /** Most requests in flight to the Future API at once (`FUTURE_MAX_CONCURRENCY`). */
+  maxConcurrency: number;
+  /** Minimum gap between request starts in ms (`FUTURE_MIN_REQUEST_INTERVAL_MS`). */
+  minRequestIntervalMs: number;
 }
+
+/** `FUTURE_MAX_CONCURRENCY` default and allowed range. */
+export const MAX_CONCURRENCY_DEFAULT = 4;
+export const MAX_CONCURRENCY_MIN = 1;
+export const MAX_CONCURRENCY_MAX = 32;
+/** `FUTURE_MIN_REQUEST_INTERVAL_MS` default (no pacing) and allowed range. */
+export const MIN_REQUEST_INTERVAL_DEFAULT_MS = 0;
+export const MIN_REQUEST_INTERVAL_MAX_MS = 60_000;
 
 /** Raised for missing or invalid configuration. Never contains the key. */
 export class ConfigError extends Error {
@@ -61,5 +73,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): FutureConfig {
   }
   const rawBase = env.FUTURE_API_BASE_URL?.trim();
   const baseUrl = validateBaseUrl(rawBase ? rawBase : DEFAULT_BASE_URL);
-  return { apiKey, baseUrl };
+  const maxConcurrency = parseIntSetting(
+    env.FUTURE_MAX_CONCURRENCY,
+    "FUTURE_MAX_CONCURRENCY",
+    MAX_CONCURRENCY_DEFAULT,
+    MAX_CONCURRENCY_MIN,
+    MAX_CONCURRENCY_MAX,
+  );
+  const minRequestIntervalMs = parseIntSetting(
+    env.FUTURE_MIN_REQUEST_INTERVAL_MS,
+    "FUTURE_MIN_REQUEST_INTERVAL_MS",
+    MIN_REQUEST_INTERVAL_DEFAULT_MS,
+    0,
+    MIN_REQUEST_INTERVAL_MAX_MS,
+  );
+  return { apiKey, baseUrl, maxConcurrency, minRequestIntervalMs };
+}
+
+/**
+ * Parses an optional integer setting. Unset or blank means `fallback`. The
+ * error names the variable and range but never echoes the raw value.
+ */
+export function parseIntSetting(
+  raw: string | undefined,
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = raw?.trim();
+  if (!value) return fallback;
+  const parsed = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new ConfigError(`${name} must be an integer from ${min} to ${max}.`);
+  }
+  return parsed;
 }

@@ -21441,6 +21441,11 @@ var EMPTY_COMPLETION_RESULT = {
 
 // src/config.ts
 var DEFAULT_BASE_URL = "https://api.futureelectronics.com";
+var MAX_CONCURRENCY_DEFAULT = 4;
+var MAX_CONCURRENCY_MIN = 1;
+var MAX_CONCURRENCY_MAX = 32;
+var MIN_REQUEST_INTERVAL_DEFAULT_MS = 0;
+var MIN_REQUEST_INTERVAL_MAX_MS = 6e4;
 var ConfigError = class extends Error {
   constructor(message) {
     super(message);
@@ -21476,8 +21481,142 @@ function loadConfig(env = process.env) {
   }
   const rawBase = env.FUTURE_API_BASE_URL?.trim();
   const baseUrl = validateBaseUrl(rawBase ? rawBase : DEFAULT_BASE_URL);
-  return { apiKey, baseUrl };
+  const maxConcurrency = parseIntSetting(
+    env.FUTURE_MAX_CONCURRENCY,
+    "FUTURE_MAX_CONCURRENCY",
+    MAX_CONCURRENCY_DEFAULT,
+    MAX_CONCURRENCY_MIN,
+    MAX_CONCURRENCY_MAX
+  );
+  const minRequestIntervalMs = parseIntSetting(
+    env.FUTURE_MIN_REQUEST_INTERVAL_MS,
+    "FUTURE_MIN_REQUEST_INTERVAL_MS",
+    MIN_REQUEST_INTERVAL_DEFAULT_MS,
+    0,
+    MIN_REQUEST_INTERVAL_MAX_MS
+  );
+  return { apiKey, baseUrl, maxConcurrency, minRequestIntervalMs };
 }
+function parseIntSetting(raw, name, fallback, min, max) {
+  const value = raw?.trim();
+  if (!value) return fallback;
+  const parsed = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new ConfigError(`${name} must be an integer from ${min} to ${max}.`);
+  }
+  return parsed;
+}
+
+// src/rateLimit.ts
+var DEFAULT_MAX_CONCURRENCY = 4;
+var DEFAULT_MIN_INTERVAL_MS = 0;
+var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var RateLimiter = class {
+  maxConcurrency;
+  minIntervalMs;
+  #now;
+  #sleep;
+  #active = 0;
+  #waiting = [];
+  /** Start gate: serializes the cooldown/pacing check so starts stay FIFO. */
+  #gate = Promise.resolve();
+  #lastStart = Number.NEGATIVE_INFINITY;
+  #pausedUntil = Number.NEGATIVE_INFINITY;
+  constructor(options = {}) {
+    const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+    if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+      throw new ConfigError("maxConcurrency must be a positive integer.");
+    }
+    const minIntervalMs = options.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
+    if (!Number.isFinite(minIntervalMs) || minIntervalMs < 0) {
+      throw new ConfigError("minIntervalMs must be a non-negative number.");
+    }
+    this.maxConcurrency = maxConcurrency;
+    this.minIntervalMs = minIntervalMs;
+    this.#now = options.now ?? Date.now;
+    this.#sleep = options.sleep ?? defaultSleep;
+  }
+  /** Requests currently holding a slot. */
+  get inFlight() {
+    return this.#active;
+  }
+  /** Callers queued for a slot. */
+  get queued() {
+    return this.#waiting.length;
+  }
+  /** Time (from `now()`) before which no new request starts. */
+  get pausedUntil() {
+    return this.#pausedUntil;
+  }
+  /**
+   * Blocks new request starts until `timestamp`, server-wide. Requests already
+   * in flight are not affected. A shorter pause never cuts a longer one short.
+   */
+  pauseUntil(timestamp) {
+    if (Number.isFinite(timestamp) && timestamp > this.#pausedUntil) {
+      this.#pausedUntil = timestamp;
+    }
+  }
+  /**
+   * Waits for a free slot (FIFO), then for any cooldown or pacing interval,
+   * and returns a release function. `notBefore` tells the limiter that the
+   * caller has already waited until that time on its own clock, so it is not
+   * made to wait for the same cooldown twice.
+   */
+  async acquire(notBefore = Number.NEGATIVE_INFINITY) {
+    if (this.#active < this.maxConcurrency && this.#waiting.length === 0) {
+      this.#active++;
+    } else {
+      await new Promise((resolve) => this.#waiting.push(resolve));
+    }
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.#releaseSlot();
+    };
+    try {
+      await this.#waitToStart(notBefore);
+    } catch (error2) {
+      release();
+      throw error2;
+    }
+    return release;
+  }
+  /** Runs `task` while holding a slot. The slot is always released. */
+  async run(task, notBefore) {
+    const release = await this.acquire(notBefore);
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  }
+  #releaseSlot() {
+    const next = this.#waiting.shift();
+    if (next) next();
+    else this.#active--;
+  }
+  #waitToStart(notBefore) {
+    const turn = this.#gate.then(() => this.#openGate(notBefore));
+    this.#gate = turn.catch(() => {
+    });
+    return turn;
+  }
+  async #openGate(notBefore) {
+    let floor = notBefore;
+    for (; ; ) {
+      const now = Math.max(this.#now(), floor);
+      const ready = Math.max(this.#pausedUntil, this.#lastStart + this.minIntervalMs);
+      if (now >= ready) {
+        this.#lastStart = now;
+        return;
+      }
+      await this.#sleep(ready - now);
+      floor = ready;
+    }
+  }
+};
 
 // src/types.ts
 var opt = (schema) => schema.optional().nullable();
@@ -21665,12 +21804,19 @@ function validateBatch(parts) {
     }
   });
 }
-function retryDelayMs(retryAfter, attempt) {
-  const seconds = retryAfter === null || retryAfter.trim() === "" ? NaN : Number(retryAfter);
-  const delay = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1e3 : BASE_BACKOFF_MS * 2 ** (attempt - 1);
+function retryDelayMs(retryAfter, attempt, now = Date.now()) {
+  const value = retryAfter?.trim() ?? "";
+  let delay = BASE_BACKOFF_MS * 2 ** (attempt - 1);
+  const seconds = value === "" ? NaN : Number(value);
+  if (Number.isFinite(seconds)) {
+    if (seconds >= 0) delay = seconds * 1e3;
+  } else if (/[A-Za-z]/.test(value)) {
+    const date3 = Date.parse(value);
+    if (Number.isFinite(date3)) delay = Math.max(0, date3 - now);
+  }
   return Math.min(delay, MAX_RETRY_DELAY_MS);
 }
-var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var defaultSleep2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 var FutureClient = class {
   #apiKey;
   #baseUrl;
@@ -21678,6 +21824,8 @@ var FutureClient = class {
   #fetch;
   #sleep;
   #maxRetries;
+  #now;
+  #limiter;
   constructor(options) {
     const apiKey = typeof options?.apiKey === "string" ? options.apiKey.trim() : "";
     if (!apiKey) throw new ConfigError("FutureClient requires a non-empty apiKey.");
@@ -21693,8 +21841,19 @@ var FutureClient = class {
     this.#baseUrl = validateBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
     this.#timeoutMs = timeoutMs;
     this.#fetch = options.fetch ?? globalThis.fetch;
-    this.#sleep = options.sleep ?? defaultSleep;
+    this.#sleep = options.sleep ?? defaultSleep2;
     this.#maxRetries = maxRetries;
+    this.#now = options.now ?? Date.now;
+    this.#limiter = new RateLimiter({
+      maxConcurrency: options.maxConcurrency,
+      minIntervalMs: options.minRequestIntervalMs,
+      now: this.#now,
+      sleep: this.#sleep
+    });
+  }
+  /** Most requests this client sends to the Future API at once. */
+  get maxConcurrency() {
+    return this.#limiter.maxConcurrency;
   }
   /** GET /lookup. `lookup_type` is sent only when provided. */
   async lookup(partNumber, lookupType) {
@@ -21712,12 +21871,19 @@ var FutureClient = class {
     return this.#request(url, { method: "POST", body }, BatchLookupResponseSchema, "batch lookup");
   }
   async #request(url, init, schema, label) {
+    let resumeAt;
     for (let attempt = 1; ; attempt++) {
-      const res = await this.#send(url, init);
+      const res = await this.#limiter.run(() => this.#send(url, init), resumeAt);
       if (res.ok) return this.#parseSuccess(res.text, schema, label);
-      if (res.status === 429 && attempt <= this.#maxRetries) {
-        await this.#sleep(retryDelayMs(res.retryAfter, attempt));
-        continue;
+      if (res.status === 429) {
+        const now = this.#now();
+        const delay = retryDelayMs(res.retryAfter, attempt, now);
+        resumeAt = now + delay;
+        this.#limiter.pauseUntil(resumeAt);
+        if (attempt <= this.#maxRetries) {
+          await this.#sleep(delay);
+          continue;
+        }
       }
       throw this.#httpError(res);
     }
