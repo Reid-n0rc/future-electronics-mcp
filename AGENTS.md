@@ -104,34 +104,34 @@ and stay SSH-signed:
 git config user.email reid@malmoset.com
 ```
 
-1. Mint a one-hour installation token. The script prints only the token, and
-   the App credentials come from the macOS Keychain (see SECURITY.md):
+Use `scripts/agent-gh.mjs` for every App action. It mints a one-hour
+installation token in-process with `scripts/agent-token.mjs` (App credentials
+from the environment, then the macOS Keychain; see SECURITY.md), refuses to run
+if the token is empty, and passes the token only in the child process's
+environment. Don't mint or export `GH_TOKEN` yourself.
+
+1. Push the issue branch:
    ```bash
-   export GH_TOKEN=$(node scripts/agent-token.mjs --from-keychain)
+   node scripts/agent-gh.mjs push <branch>
    ```
-   On other systems, don't pass `--from-keychain`. Instead set
-   `FUTURE_AGENT_APP_ID`, `FUTURE_AGENT_INSTALLATION_ID`, and
-   `FUTURE_AGENT_PRIVATE_KEY` (PEM) or `FUTURE_AGENT_PRIVATE_KEY_B64` from a
-   secret manager.
-2. **Check that the token isn't empty** before using it:
-   `[ -n "$GH_TOKEN" ] || exit 1`. If `GH_TOKEN` is empty, `gh` silently falls
-   back to the maintainer's own login, and the PR is authored by the wrong
-   account. Then push through `gh`'s credential helper, so the token never
-   appears in a URL:
+   Only `issue-<n>-<slug>` branches are accepted (never `dev` or `master`),
+   and `origin` must be `https://github.com/Reid-n0rc/future-electronics-mcp.git`.
+   The token reaches git through a one-shot credential helper set with
+   `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, so nothing is
+   written to git config or a remote URL.
+2. Open the PR, and run the other allowed `gh` commands, through the helper:
    ```bash
-   git -c credential.helper= -c credential.helper='!gh auth git-credential' push -u origin <branch>
+   node scripts/agent-gh.mjs gh pr create -R Reid-n0rc/future-electronics-mcp -B dev --head <branch> --reviewer Reid-n0rc --title "..." --body-file <file>
    ```
-   **Never persist the token** in a git remote URL, git config, or a file, and
-   never echo or log it.
-3. Open the PR with `GH_TOKEN` still set, so `gh` acts as the App:
-   ```bash
-   gh pr create -R Reid-n0rc/future-electronics-mcp -B dev --head <branch> --reviewer Reid-n0rc --title "..." --body-file <file>
-   ```
-   Always pass `--reviewer Reid-n0rc`. CODEOWNERS didn't auto-request review
-   on App PRs in testing (#49).
-4. Assign the issue to @Reid-n0rc, the accountable human.
-5. When you're done, run `unset GH_TOKEN`. The token expires after one hour
-   anyway.
+   Only `pr create`, `pr view`, `pr checks`, `pr comment`, `issue view` and
+   `issue edit` on this repository are allowed. `pr merge`, `pr review`,
+   `api`, `auth` and everything else are refused. Always pass
+   `--reviewer Reid-n0rc`. CODEOWNERS didn't auto-request review on App PRs
+   in testing (#49).
+3. Assign the issue to @Reid-n0rc, the accountable human.
+
+**Never persist the token** in a git remote URL, git config, or a file, and
+never echo or log it. The helper redacts it from its output and errors.
 
 ## Task sizing (context-window budget)
 
