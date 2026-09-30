@@ -114,12 +114,22 @@ That writes `build/future-electronics-mcp.mcpb`.
 |-----------------------|------------------|--------------------------------------------------------------------------------|
 | `FUTURE_API_KEY`      | Yes, for lookups | License key, sent as the `x-orbweaver-licensekey` header. Never logged or returned. |
 | `FUTURE_API_BASE_URL` | No               | Override the API origin (default `https://api.futureelectronics.com`). Must be `https`. |
+| `FUTURE_MAX_CONCURRENCY` | No            | Most requests in flight to the Future API at once, across all tool calls. Integer 1–32, default `4`. |
+| `FUTURE_MIN_REQUEST_INTERVAL_MS` | No    | Minimum gap between request starts, in ms. Integer 0–60000, default `0` (no pacing). |
 
 The server **starts without a key**. The key is read the first time a tool is
 called, and a missing key fails only that call, with a clear error. With the
 plugin install, Claude Code sets `FUTURE_API_KEY` from the key you entered at
 install. Otherwise, keep the key in your environment or a secret manager (for
 example 1Password); never put it in a committed file.
+
+Future Electronics publishes no numeric rate limit; its docs only say that a
+`429 Too Many Requests` means "please wait and try again". The server therefore
+caps parallel requests (`FUTURE_MAX_CONCURRENCY`) and does not pace them by
+default. After a 429, it pauses every new request, server-wide, for the
+`Retry-After` period (seconds or an HTTP date) or the backoff delay. Requests
+already in flight finish normally. Invalid values for either setting fail the
+first tool call with a clear error.
 
 ## MCP tools
 
@@ -280,7 +290,9 @@ when it sends one.
   `Retry-After` (capped at 30 s) or backing off exponentially. If you still get
   429, wait before retrying and send fewer calls. `future_lookup_parts` sends
   its batches one after another for this reason, so prefer one large call over
-  many small ones.
+  many small ones. If 429s keep happening, lower `FUTURE_MAX_CONCURRENCY` (for
+  example to `1` or `2`) or set `FUTURE_MIN_REQUEST_INTERVAL_MS` (for example
+  `500`) to space requests out, then restart the server.
 - **The server doesn't start, or `dist/index.js` is not found.** Run
   `npm ci && npm run build` in the clone, and check `node --version` is 22.12
   or later.

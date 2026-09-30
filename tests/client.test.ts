@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { ConfigError } from "../src/config.js";
+import { ConfigError, loadConfig } from "../src/config.js";
 import {
   BASE_BACKOFF_MS,
   BATCH_LOOKUP_PATH,
@@ -176,7 +176,7 @@ describe("retryDelayMs", () => {
   it("caps Retry-After", () => {
     expect(retryDelayMs("3600", 1)).toBe(MAX_RETRY_DELAY_MS);
   });
-  it.each([null, "", "  ", "soon", "-1", "Wed, 21 Oct 2015 07:28:00 GMT"])(
+  it.each([null, "", "  ", "soon", "-1", "Wed, 99 Foo 2015 07:28:00 GMT", "12abc"])(
     "falls back to exponential backoff for %j",
     (value) => {
       expect(retryDelayMs(value, 1)).toBe(BASE_BACKOFF_MS);
@@ -186,6 +186,25 @@ describe("retryDelayMs", () => {
   );
   it("caps exponential backoff", () => {
     expect(retryDelayMs(null, 20)).toBe(MAX_RETRY_DELAY_MS);
+  });
+
+  const NOW = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");
+  it("honors an HTTP-date in the future", () => {
+    expect(retryDelayMs("Wed, 21 Oct 2015 07:28:05 GMT", 1, NOW)).toBe(5000);
+    expect(retryDelayMs("  Wed, 21 Oct 2015 07:28:01 GMT ", 3, NOW)).toBe(1000);
+  });
+  it("treats an HTTP-date in the past (or now) as no wait", () => {
+    expect(retryDelayMs("Wed, 21 Oct 2015 07:27:00 GMT", 1, NOW)).toBe(0);
+    expect(retryDelayMs("Wed, 21 Oct 2015 07:28:00 GMT", 2, NOW)).toBe(0);
+  });
+  it("caps a far-future HTTP-date", () => {
+    expect(retryDelayMs("Thu, 22 Oct 2015 07:28:00 GMT", 1, NOW)).toBe(MAX_RETRY_DELAY_MS);
+  });
+  it("uses the current time by default for HTTP-dates", () => {
+    expect(retryDelayMs("Wed, 21 Oct 2015 07:28:00 GMT", 1)).toBe(0);
+    expect(retryDelayMs(new Date(Date.now() + 3_600_000).toUTCString(), 1)).toBe(
+      MAX_RETRY_DELAY_MS,
+    );
   });
 });
 
@@ -611,6 +630,181 @@ describe("key never leaks", () => {
     ]);
     const error = await catchError(client.lookup(KEY));
     expect(error.message).toContain("[REDACTED]");
+    expect(dump(error)).not.toContain(KEY);
+  });
+});
+
+describe("rate limiting", () => {
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  }
+
+  /** fetch mock whose responses the test releases one at a time. */
+  function gatedFetch() {
+    const pending: Array<(res: Response) => void> = [];
+    const state = { active: 0, peak: 0 };
+    const fetchMock = vi.fn<typeof fetch>(
+      () =>
+        new Promise<Response>((resolve) => {
+          state.active++;
+          state.peak = Math.max(state.peak, state.active);
+          pending.push((res) => {
+            state.active--;
+            resolve(res);
+          });
+        }),
+    );
+    return { fetchMock, pending, state };
+  }
+
+  it("exposes maxConcurrency, defaulting to 4", () => {
+    expect(new FutureClient({ apiKey: KEY }).maxConcurrency).toBe(4);
+    expect(new FutureClient({ apiKey: KEY, maxConcurrency: 9 }).maxConcurrency).toBe(9);
+  });
+
+  it.each([
+    [{ maxConcurrency: 0 }, /maxConcurrency/],
+    [{ maxConcurrency: 2.5 }, /maxConcurrency/],
+    [{ minRequestIntervalMs: -5 }, /minIntervalMs/],
+  ])("rejects %j", (options, pattern) => {
+    expect(() => new FutureClient({ apiKey: KEY, ...options })).toThrow(ConfigError);
+    expect(() => new FutureClient({ apiKey: KEY, ...options })).toThrow(pattern);
+  });
+
+  it("accepts a loadConfig result directly", () => {
+    const config = loadConfig({ FUTURE_API_KEY: KEY, FUTURE_MAX_CONCURRENCY: "3" });
+    expect(new FutureClient(config).maxConcurrency).toBe(3);
+  });
+
+  it.each([1, 2, 4])("keeps at most %i requests in flight", async (n) => {
+    const gate = gatedFetch();
+    const client = new FutureClient({ apiKey: KEY, fetch: gate.fetchMock, maxConcurrency: n });
+    const total = n * 2 + 1;
+    const calls = Array.from({ length: total }, (_, i) =>
+      i % 2 ? client.batchLookup(["ABC"]) : client.lookup("ABC"),
+    );
+    await flush();
+    expect(gate.state.active).toBe(n);
+    while (gate.pending.length) {
+      gate.pending.shift()!(response(500, ""));
+      await flush();
+      expect(gate.state.active).toBeLessThanOrEqual(n);
+    }
+    await Promise.allSettled(calls);
+    expect(gate.state.peak).toBe(n);
+    expect(gate.fetchMock).toHaveBeenCalledTimes(total);
+  });
+
+  it("adds no delay for a single call with the defaults", async () => {
+    const { client, sleep } = setup([response(200, partFixture)]);
+    await client.lookup("ABC");
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("frees slots after timeouts, network errors, HTTP errors and schema mismatches", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      )
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(response(500, ""))
+      .mockResolvedValueOnce(response(200, JSON.stringify({ wrong: true })))
+      .mockResolvedValueOnce(response(200, "not json"));
+    const client = new FutureClient({
+      apiKey: KEY,
+      fetch: fetchMock,
+      maxConcurrency: 1,
+      timeoutMs: 10,
+    });
+    const codes: string[] = [];
+    for (let i = 0; i < 5; i++) codes.push((await catchError(client.lookup("ABC"))).code);
+    expect(codes).toEqual(["timeout", "network", "http", "invalid_response", "invalid_response"]);
+    // With a single slot, these would hang forever if any failure had leaked it.
+    fetchMock.mockImplementation(async () => response(200, partFixture));
+    await expect(Promise.all([client.lookup("ABC"), client.lookup("ABC")])).resolves.toHaveLength(
+      2,
+    );
+  });
+
+  it("pauses every caller after a 429 without cancelling in-flight requests", async () => {
+    let time = 0;
+    const timers: Array<{ at: number; resolve: () => void }> = [];
+    const sleep = vi.fn(
+      (ms: number) => new Promise<void>((resolve) => timers.push({ at: time + ms, resolve })),
+    );
+    const advance = async (ms: number) => {
+      time += ms;
+      for (const t of timers.filter((t) => t.at <= time)) {
+        timers.splice(timers.indexOf(t), 1);
+        t.resolve();
+      }
+      await flush();
+    };
+    const gate = gatedFetch();
+    const client = new FutureClient({
+      apiKey: KEY,
+      fetch: gate.fetchMock,
+      sleep,
+      now: () => time,
+    });
+
+    const a = client.lookup("AAA");
+    const b = client.lookup("BBB");
+    await flush();
+    expect(gate.fetchMock).toHaveBeenCalledTimes(2);
+
+    // A gets a 429 with Retry-After: 2 while B is still in flight.
+    gate.pending.shift()!(response(429, "", { "Retry-After": "2" }));
+    await flush();
+    const c = client.lookup("CCC");
+    await flush();
+    await advance(1999);
+    expect(gate.fetchMock).toHaveBeenCalledTimes(2); // nothing new starts during the cooldown
+
+    // B was not cancelled and completes normally.
+    gate.pending.shift()!(response(200, partFixture));
+    await expect(b).resolves.toBeDefined();
+
+    await advance(1);
+    expect(gate.fetchMock).toHaveBeenCalledTimes(4); // A's retry and C start together
+    expect(sleep.mock.calls.map((call) => call[0])).toEqual([2000, 2000]);
+    gate.pending.shift()!(response(200, partFixture));
+    gate.pending.shift()!(response(200, partFixture));
+    await expect(Promise.all([a, c])).resolves.toHaveLength(2);
+  });
+
+  it("honors an HTTP-date Retry-After on retry", async () => {
+    const now = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");
+    const { client, sleep } = setup(
+      [
+        response(429, "", { "Retry-After": "Wed, 21 Oct 2015 07:28:03 GMT" }),
+        response(200, partFixture),
+      ],
+      { now: () => now },
+    );
+    await client.lookup("ABC");
+    expect(sleep.mock.calls.map((call) => call[0])).toEqual([3000]);
+  });
+
+  it("paces request starts when minRequestIntervalMs is set", async () => {
+    const { client, sleep } = setup([response(200, partFixture), response(200, partFixture)], {
+      minRequestIntervalMs: 500,
+      now: () => 0,
+    });
+    await client.lookup("ABC");
+    await client.lookup("ABC");
+    expect(sleep.mock.calls.map((call) => call[0])).toEqual([500]);
+  });
+
+  it("keeps the key out of rate-limit errors", async () => {
+    const body = JSON.stringify({ message: `slow down ${KEY}` });
+    const { client } = setup([response(429, body)], { maxRetries: 0 });
+    const error = await catchError(client.lookup("ABC"));
+    expect(error.status).toBe(429);
     expect(dump(error)).not.toContain(KEY);
   });
 });
