@@ -117,6 +117,7 @@ That writes `build/future-electronics-mcp.mcpb`.
 | `FUTURE_MAX_CONCURRENCY` | No            | Most requests in flight to the Future API at once, across all tool calls. Integer 1–32, default `4`. |
 | `FUTURE_MIN_REQUEST_INTERVAL_MS` | No    | Minimum gap between request starts, in ms. Integer 0–60000, default `0` (no pacing). |
 | `FUTURE_WORKSPACE_DIR` | No              | Absolute path of the [workspace folder](#workspace-folder) for BOM files and exports. |
+| `FUTURE_MAX_OUTPUT_TOKENS` | No          | Most tokens one tool result may use, estimated as characters / 4. Integer 1000–100000, default `8000`. See [Output budget](#output-budget). |
 
 The server **starts without a key**. The key is read the first time a tool is
 called, and a missing key fails only that call, with a clear error. With the
@@ -154,6 +155,17 @@ separate filesystem connector.
 Both tools are read-only. Every summary carries a `note` saying that pricing is
 not an official quote.
 
+### Output budget
+
+Tool results are compact JSON (no whitespace), and no result is longer than
+`FUTURE_MAX_OUTPUT_TOKENS` (default 8000 tokens, estimated as characters / 4).
+When a result would be longer, rows are dropped from the end of its lists
+(`offers`, the `issues` or `parts` table rows, or raw `batches`) and a
+`truncated: {omitted, hint}` field says how many were dropped. Nothing is ever
+cut silently. If even the result without those lists is too long, the tool
+returns `{error: "output_budget_exceeded", message}` with `isError: true`
+instead of partial JSON.
+
 ### `future_lookup_part`
 
 Look up one part by manufacturer part number (GET `/lookup`).
@@ -166,7 +178,8 @@ Look up one part by manufacturer part number (GET `/lookup`).
 | `max_offers`  | integer | `10`      | 1 to 50. Offers beyond this are dropped; `total_offers` gives the full count.    |
 | `raw`         | boolean | `false`   | Return the untouched upstream response (offers still truncated to `max_offers`). Ignores `quantity`. |
 
-**Output:** `lookup_value`, `lookup_results`, `note`, `total_offers`,
+**Output** (subject to the [output budget](#output-budget), which drops
+offers from the end): `lookup_value`, `lookup_results`, `note`, `total_offers`,
 `quantity` (when given), and `offers[]`. Each offer can have `mpn`,
 `seller_part_number`, `web_url`, `quantity_available`, `quantity_on_order`,
 `quantity_minimum`, `order_mult_qty`, `lead_time` (for example `"12 Weeks"`,
@@ -178,7 +191,7 @@ are omitted. `price_at_quantity` is either `{price_break: {...}}` or
 `quantity_minimum`), `no_pricing`, or `no_matching_break`.
 
 Example, from the synthetic test fixture (`part_number: "TEST-1234"`,
-`quantity: 5000`, `max_offers: 1`):
+`quantity: 5000`, `max_offers: 1`), pretty-printed here:
 
 ```json
 {
@@ -221,7 +234,8 @@ match).
 | Input   | Type    | Default  | Limits and notes                                                                                   |
 |---------|---------|----------|----------------------------------------------------------------------------------------------------|
 | `parts` | array   | required | 1 to 2000 items. Each is a string (`"LM317T"`) or `{"part_number": "LM317T", "quantity": 500}`. Part numbers must not be blank; `quantity` is an optional positive integer up to 1,000,000,000. |
-| `raw`   | boolean | `false`  | Return the untouched upstream batch responses instead of per-part summaries. Much larger.         |
+| `detail` | enum   | `summary` | `summary`: totals plus an `issues` table of problem parts only. `all`: a `parts` table row for every part. |
+| `raw`   | boolean | `false`  | Return the untouched upstream batch responses instead of the summary. Far larger, so the budget usually drops whole batches. |
 
 Behavior:
 
@@ -237,46 +251,74 @@ Behavior:
 - If a batch still gets HTTP 429 after the client's retries, the lookup stops
   early: no new batch starts, batches already running finish and are reported
   normally, and the parts of batches never started get status
-  `not_attempted` with `error: "Not attempted: the Future API rate limit was
-  reached. Retry these parts later."`. `totals.rate_limited` is then `true`.
+  `not_attempted`. `totals.rate_limited` is then `true`, and
+  `not_attempted_note` says to retry those parts later.
 - The call is flagged as an error only when nothing succeeded (every batch
   failed or was not attempted, or every part was invalid).
 
-**Output:** `note`, `totals` (`requested`, `unique`, `found`, `not_found`,
-`errors`, `not_attempted`, `batches`, `rate_limited`), and `parts[]`, one per
-unique part, in input order. Each has `part_number`, `quantity`, and `status`
-(`found`, `not_found`, `error`, or `not_attempted`). Found parts add
-`offer_count` and details from the best offer (the one with the most stock):
-`mpn`, `quantity_available`, `lead_time`, `currency_code`, and `price` (the
-same shape as `price_at_quantity` above). Error and not-attempted parts add
-`error`. With `raw: true` the output is `note`, `totals`, `batches[]` in input
-order (each `{part_numbers, response}`, `{part_numbers, error}`, or
-`{part_numbers, not_attempted: true, error}` for a batch skipped after a rate
-limit), and `invalid_parts[]` when any were rejected.
+**Output** is problems-first, so its size grows with the number of problems,
+not with the size of the BOM. Each part is judged on its best offer (the one
+with the most stock) at its quantity (1 when none was given):
 
-Example, from the synthetic batch fixture (`parts: ["TEST-0000", "TEST-5678"]`):
+- `note` and `totals`: `requested`, `unique`, `found`, `not_found`, `errors`,
+  `not_attempted`, `short_stock`, `below_moq`, `call_for_leadtime`, `batches`,
+  and `rate_limited`.
+- `extended_cost`: quantity × the unit price of the applicable price break,
+  summed over found parts, per currency code (for example
+  `{"USD": 1234.5, "EUR": 80}`), rounded to cents.
+- `unpriced`: found parts with no applicable price break (for example below
+  the first break), left out of `extended_cost`.
+- `max_lead_time`: the longest lead time among found parts, as reported
+  (`"CALL"` lead times are counted in `call_for_leadtime` instead).
+- `issues`: a table, `{columns, rows}`, of **only the parts with problems**,
+  in input order. Columns: `part_number`, `status`, `reason`, `quantity`,
+  `available`, `lead_time`. Parts with no problem appear only in the counts.
+
+Problem reasons (a part can have several, joined by `;` in `reason`):
+
+| Reason              | When                                                                         |
+|---------------------|------------------------------------------------------------------------------|
+| `short_stock`       | `quantity_available` < the quantity (unknown stock is not flagged).          |
+| `below_moq`         | A given quantity < the offer's `quantity_minimum`. Not checked for parts with no quantity. |
+| `call_for_leadtime` | The factory lead time is `"CALL"`.                                           |
+| `not_found`         | No offer for the part.                                                       |
+| `error: <message>`  | The part was invalid, or its batch failed.                                   |
+| `not_attempted`     | Its batch never started because of the rate limit.                           |
+
+With `detail: "all"` the `issues` table is replaced by a `parts` table with a
+row for every part: `part_number`, `mpn`, `status`, `reason` (empty when
+none), `quantity`, `available`, `moq`, `lead_time`, `currency`, and
+`unit_price` (null when no price break applies). Long tables are cut by the
+[output budget](#output-budget), with a `truncated` note.
+
+With `raw: true` the output is `note`, `totals`, `batches[]` in input order
+(each `{part_numbers, response}`, `{part_numbers, error}`, or
+`{part_numbers, not_attempted: true, error}` for a batch skipped after a rate
+limit), and `invalid_parts[]` when any were rejected. A 300-part raw batch is
+far larger than the default budget, so raw output is only practical for a
+small batch.
+
+Example, from the synthetic batch fixture (`parts: ["TEST-0000",
+{"part_number": "TEST-5678", "quantity": 500}]`), pretty-printed here:
 
 ```json
 {
   "note": "Pricing is not an official quote. Confirm price and availability with Future Electronics before ordering.",
   "totals": {
     "requested": 2, "unique": 2, "found": 1, "not_found": 1, "errors": 0,
-    "not_attempted": 0, "batches": 1, "rate_limited": false
+    "not_attempted": 0, "short_stock": 1, "below_moq": 0, "call_for_leadtime": 0,
+    "batches": 1, "rate_limited": false
   },
-  "parts": [
-    { "part_number": "TEST-0000", "quantity": 1, "status": "not_found" },
-    {
-      "part_number": "TEST-5678",
-      "quantity": 1,
-      "status": "found",
-      "offer_count": 1,
-      "mpn": "TEST-5678",
-      "quantity_available": 250,
-      "lead_time": "8 Weeks",
-      "currency_code": "EUR",
-      "price": { "price_break": { "from": 1, "to": 99, "unit_price": 0.15 } }
-    }
-  ]
+  "extended_cost": { "EUR": 45 },
+  "unpriced": 0,
+  "max_lead_time": "8 Weeks",
+  "issues": {
+    "columns": ["part_number", "status", "reason", "quantity", "available", "lead_time"],
+    "rows": [
+      ["TEST-0000", "not_found", "not_found", 1, null, null],
+      ["TEST-5678", "found", "short_stock", 500, 250, "8 Weeks"]
+    ]
+  }
 }
 ```
 

@@ -1,25 +1,37 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { FutureApiError, FutureClient, MAX_BATCH_PARTS } from "../../src/client.js";
 import { ConfigError } from "../../src/config.js";
 import { PRICING_DISCLAIMER } from "../../src/format.js";
+import { estimateTokens } from "../../src/output.js";
 import { createServer } from "../../src/server.js";
 import type { ClientProvider } from "../../src/tools/common.js";
 import {
   DEFAULT_QUANTITY,
+  ISSUE_COLUMNS,
+  LOOKUP_PARTS_DESCRIPTION,
   LOOKUP_PARTS_TOOL_NAME,
   MAX_LOOKUP_PARTS,
   NOT_ATTEMPTED_MESSAGE,
+  PART_COLUMNS,
+  TRUNCATION_HINT,
   bestOffer,
   chunk,
   dedupeParts,
+  extendedCost,
+  leadTimeDays,
   lookupParts,
+  maxLeadTime,
+  partsTable,
   poolSize,
+  problemReasons,
   registerLookupPartsTool,
+  type PartResult,
 } from "../../src/tools/lookupParts.js";
-import type { BatchLookupResponse, Offer } from "../../src/types.js";
+import type { BatchLookupResponse, Offer, PartLookupResponse } from "../../src/types.js";
 
 // ---------- fixtures ----------
 
@@ -61,6 +73,20 @@ const providerFor = (stub: Stub): ClientProvider => () => stub as unknown as Fut
 
 const partNames = (n: number, prefix = "PART") =>
   Array.from({ length: n }, (_, i) => `${prefix}-${String(i).padStart(4, "0")}`);
+
+// A roomy budget so these tests see every row; budget tests set their own.
+beforeEach(() => {
+  vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "100000");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+/** Rows of a `{columns, rows}` table as objects keyed by column name. */
+const asObjects = (table: { columns: string[]; rows: unknown[][] }): any[] =>
+  table.rows.map((r) => Object.fromEntries(table.columns.map((c, i) => [c, r[i]])));
+/** Every part from a `detail: "all"` result. */
+const allParts = (json: any): any[] => asObjects(json.parts);
 
 // ---------- MCP harness ----------
 
@@ -194,10 +220,13 @@ describe("lookupParts", () => {
       not_found: 0,
       errors: 2,
       not_attempted: 0,
+      short_stock: 0,
+      below_moq: 0,
+      call_for_leadtime: 0,
       batches: 0,
       rate_limited: false,
     });
-    expect(json.parts[0].error).toMatch(/at least 3 alphanumeric/);
+    expect(json.issues.rows[0][2]).toMatch(/^error: .*at least 3 alphanumeric/);
   });
 
   it("returns a key-free error result when the client cannot be created", async () => {
@@ -235,7 +264,7 @@ describe("future_lookup_parts over MCP", () => {
       return echoResponse(parts);
     });
     const names = partNames(650);
-    const { res, json } = await call(providerFor(stub), { parts: names });
+    const { res, json } = await call(providerFor(stub), { parts: names, detail: "all" });
     expect(res.isError).toBeFalsy();
     expect(stub.batchLookup).toHaveBeenCalledTimes(3);
     const sizes = stub.batchLookup.mock.calls.map((c) => (c[0] as string[]).length);
@@ -250,10 +279,13 @@ describe("future_lookup_parts over MCP", () => {
       not_found: 0,
       errors: 0,
       not_attempted: 0,
+      short_stock: 0,
+      below_moq: 0,
+      call_for_leadtime: 0,
       batches: 3,
       rate_limited: false,
     });
-    expect(json.parts).toHaveLength(650);
+    expect(json.parts.rows).toHaveLength(650);
     expect(json.note).toBe(PRICING_DISCLAIMER);
   });
 
@@ -281,14 +313,15 @@ describe("future_lookup_parts over MCP", () => {
         { part_number: "LM317T", quantity: 50 },
         "NE555",
       ],
+      detail: "all",
     });
     expect(stub.batchLookup).toHaveBeenCalledTimes(1);
     expect(stub.batchLookup.mock.calls[0]![0]).toEqual(["LM317T", "NE555"]);
     expect(json.totals).toMatchObject({ requested: 4, unique: 2 });
-    const lm = json.parts[0];
+    const lm = allParts(json)[0];
     expect(lm.part_number).toBe("LM317T");
     expect(lm.quantity).toBe(110);
-    expect(lm.price).toEqual({ price_break: { from: 100, to: 999, unit_price: 0.8 } });
+    expect(lm.unit_price).toBe(0.8);
   });
 
   it("applies quantity pricing to the best (most stock) offer", async () => {
@@ -306,22 +339,26 @@ describe("future_lookup_parts over MCP", () => {
         { part_number: "QTY2", quantity: 2500 },
         "QTY3",
       ],
+      detail: "all",
     });
-    const [p1, p2, p3] = json.parts;
+    expect(json.parts.columns).toEqual(PART_COLUMNS);
+    const [p1, p2, p3] = allParts(json);
     expect(p1).toEqual({
       part_number: "QTY1",
-      quantity: 5,
-      status: "found",
-      offer_count: 2,
       mpn: "BIG",
-      quantity_available: 5000,
+      status: "found",
+      reason: "",
+      quantity: 5,
+      available: 5000,
+      moq: null,
       lead_time: "12 Weeks",
-      currency_code: "USD",
-      price: { price_break: { from: 1, to: 99, unit_price: 1 } },
+      currency: "USD",
+      unit_price: 1,
     });
-    expect(p2.price).toEqual({ price_break: { from: 1000, unit_price: 0.5 } });
+    expect(p2.unit_price).toBe(0.5);
     expect(p3.quantity).toBe(DEFAULT_QUANTITY);
-    expect(p3.price.price_break.unit_price).toBe(1);
+    expect(p3.unit_price).toBe(1);
+    expect(json.extended_cost).toEqual({ USD: 5 * 1 + 2500 * 0.5 + 1 * 1 });
   });
 
   it("reports below_minimum and no_pricing reasons from priceAt", async () => {
@@ -335,13 +372,12 @@ describe("future_lookup_parts over MCP", () => {
     }));
     const { json } = await call(providerFor(stub), {
       parts: [{ part_number: "MOQ100", quantity: 10 }, "NOPRICE"],
+      detail: "all",
     });
-    expect(json.parts[0].price).toEqual({
-      price_break: null,
-      reason: "below_minimum",
-      quantity_minimum: 50,
-    });
-    expect(json.parts[1].price).toEqual({ price_break: null, reason: "no_pricing" });
+    // No applicable break (below_minimum, no_pricing): no unit price, counted as unpriced.
+    expect(allParts(json).map((p) => p.unit_price)).toEqual([null, null]);
+    expect(json.unpriced).toBe(2);
+    expect(json.extended_cost).toEqual({});
   });
 
   it("marks parts with no offers or no response entry as not_found", async () => {
@@ -350,10 +386,13 @@ describe("future_lookup_parts over MCP", () => {
     }));
     const { res, json } = await call(providerFor(stub), { parts: ["MISS-1", "GONE-2"] });
     expect(res.isError).toBeFalsy();
-    expect(json.parts).toEqual([
-      { part_number: "MISS-1", quantity: 1, status: "not_found" },
-      { part_number: "GONE-2", quantity: 1, status: "not_found" },
-    ]);
+    expect(json.issues).toEqual({
+      columns: ISSUE_COLUMNS,
+      rows: [
+        ["MISS-1", "not_found", "not_found", 1, null, null],
+        ["GONE-2", "not_found", "not_found", 1, null, null],
+      ],
+    });
     expect(json.totals).toMatchObject({ found: 0, not_found: 2, errors: 0 });
   });
 
@@ -364,9 +403,9 @@ describe("future_lookup_parts over MCP", () => {
         { offers: [offer(2)] },
       ],
     }));
-    const { json } = await call(providerFor(stub), { parts: ["ABC123", "DEF456"] });
-    expect(json.parts[0]).toMatchObject({ status: "found", quantity_available: 1 });
-    expect(json.parts[1]).toMatchObject({ status: "found", quantity_available: 2 });
+    const { json } = await call(providerFor(stub), { parts: ["ABC123", "DEF456"], detail: "all" });
+    expect(allParts(json)[0]).toMatchObject({ status: "found", available: 1 });
+    expect(allParts(json)[1]).toMatchObject({ status: "found", available: 2 });
   });
 
   it("still returns the other chunks when the middle chunk fails with a non-429 error", async () => {
@@ -382,7 +421,7 @@ describe("future_lookup_parts over MCP", () => {
       return echoResponse(parts);
     });
     const names = partNames(650);
-    const { res, json } = await call(providerFor(stub), { parts: names });
+    const { res, json } = await call(providerFor(stub), { parts: names, detail: "all" });
     expect(res.isError).toBeFalsy();
     expect(stub.batchLookup).toHaveBeenCalledTimes(3);
     expect(json.totals).toEqual({
@@ -392,14 +431,18 @@ describe("future_lookup_parts over MCP", () => {
       not_found: 0,
       errors: 300,
       not_attempted: 0,
+      short_stock: 0,
+      below_moq: 0,
+      call_for_leadtime: 0,
       batches: 3,
       rate_limited: false,
     });
-    expect(json.parts.slice(0, 300).every((p: any) => p.status === "found")).toBe(true);
-    expect(json.parts.slice(600).every((p: any) => p.status === "found")).toBe(true);
-    for (const p of json.parts.slice(300, 600)) {
+    const parts = allParts(json);
+    expect(parts.slice(0, 300).every((p: any) => p.status === "found")).toBe(true);
+    expect(parts.slice(600).every((p: any) => p.status === "found")).toBe(true);
+    for (const p of parts.slice(300, 600)) {
       expect(p.status).toBe("error");
-      expect(p.error).toBe("Future API request failed with HTTP 503.");
+      expect(p.reason).toBe("error: Future API request failed with HTTP 503.");
     }
   });
 
@@ -411,7 +454,7 @@ describe("future_lookup_parts over MCP", () => {
       return echoResponse(parts);
     });
     const names = partNames(650);
-    const { res, json } = await call(providerFor(stub), { parts: names });
+    const { res, json } = await call(providerFor(stub), { parts: names, detail: "all" });
     expect(res.isError).toBeFalsy();
     expect(stub.batchLookup).toHaveBeenCalledTimes(2);
     expect(json.totals).toEqual({
@@ -421,21 +464,21 @@ describe("future_lookup_parts over MCP", () => {
       not_found: 0,
       errors: 300,
       not_attempted: 50,
+      short_stock: 0,
+      below_moq: 0,
+      call_for_leadtime: 0,
       batches: 3,
       rate_limited: true,
     });
-    for (const p of json.parts.slice(300, 600)) {
+    const parts = allParts(json);
+    for (const p of parts.slice(300, 600)) {
       expect(p.status).toBe("error");
-      expect(p.error).toMatch(/^Rate limited/);
+      expect(p.reason).toMatch(/^error: Rate limited/);
     }
-    for (const p of json.parts.slice(600)) {
-      expect(p).toEqual({
-        part_number: p.part_number,
-        quantity: 1,
-        status: "not_attempted",
-        error: NOT_ATTEMPTED_MESSAGE,
-      });
+    for (const p of parts.slice(600)) {
+      expect(p).toMatchObject({ quantity: 1, status: "not_attempted", reason: "not_attempted" });
     }
+    expect(json.not_attempted_note).toBe(NOT_ATTEMPTED_MESSAGE);
   });
 
   it("uses a generic message for unexpected (non-API) errors so internals never leak", async () => {
@@ -446,7 +489,9 @@ describe("future_lookup_parts over MCP", () => {
     expect(res.isError).toBe(true);
     expect(text).not.toContain("test-key");
     expect(text).not.toContain("secret internal");
-    expect(json.parts[0].error).toBe("Unexpected error while calling the Future Electronics API.");
+    expect(json.issues.rows[0][2]).toBe(
+      "error: Unexpected error while calling the Future Electronics API.",
+    );
   });
 
   it("returns isError when every chunk fails", async () => {
@@ -467,8 +512,10 @@ describe("future_lookup_parts over MCP", () => {
     const { res, json } = await call(providerFor(stub), { parts: ["LM317T", "a-b", "NE555"] });
     expect(res.isError).toBeFalsy();
     expect(stub.batchLookup.mock.calls[0]![0]).toEqual(["LM317T", "NE555"]);
-    expect(json.parts[1]).toMatchObject({ part_number: "a-b", status: "error" });
-    expect(json.parts[1].error).toMatch(/at least 3 alphanumeric/);
+    const [bad] = asObjects(json.issues);
+    expect(json.issues.rows).toHaveLength(1);
+    expect(bad).toMatchObject({ part_number: "a-b", status: "error" });
+    expect(bad.reason).toMatch(/at least 3 alphanumeric/);
     expect(json.totals).toMatchObject({ found: 2, errors: 1, batches: 1 });
   });
 
@@ -484,6 +531,7 @@ describe("future_lookup_parts over MCP", () => {
     expect(res.isError).toBeFalsy();
     expect(json.note).toBe(PRICING_DISCLAIMER);
     expect(json.parts).toBeUndefined();
+    expect(json.issues).toBeUndefined();
     expect(json.batches).toHaveLength(2);
     expect(json.batches[0].part_numbers).toHaveLength(300);
     expect(json.batches[0].response).toEqual(echoResponse(names.slice(0, 300)));
@@ -500,9 +548,10 @@ describe("future_lookup_parts over MCP", () => {
     expect(json.batches).toHaveLength(1);
   });
 
-  it("defaults raw to false", async () => {
+  it("defaults raw to false and detail to summary", async () => {
     const { json } = await call(providerFor(stubClient()), { parts: ["LM317T"] });
-    expect(json.parts).toHaveLength(1);
+    expect(json.issues).toEqual({ columns: ISSUE_COLUMNS, rows: [] });
+    expect(json.parts).toBeUndefined();
     expect(json.batches).toBeUndefined();
   });
 
@@ -519,6 +568,7 @@ describe("future_lookup_parts over MCP", () => {
     ["non-string part", { parts: [42] }],
     ["missing parts", {}],
     ["non-boolean raw", { parts: ["LM317T"], raw: "yes" }],
+    ["unknown detail", { parts: ["LM317T"], detail: "full" }],
   ])("rejects invalid input: %s", async (_label, args) => {
     const stub = stubClient();
     const { res } = await call(providerFor(stub), args as Record<string, unknown>);
@@ -625,7 +675,7 @@ describe("lookupParts parallel batches", () => {
     const names = partNames(2000);
     const respond = indexedResponse(names);
     const { stub, gates, state, getClient } = gatedClient(4);
-    const done = lookupParts({ parts: names }, getClient);
+    const done = lookupParts({ parts: names, detail: "all" }, getClient);
     await flush();
     expect(stub.batchLookup).toHaveBeenCalledTimes(4);
     expect(state.inFlight).toBe(4);
@@ -645,8 +695,9 @@ describe("lookupParts parallel batches", () => {
 
     const json = parse(res);
     expect(res.isError).toBeFalsy();
-    expect(json.parts.map((p: any) => p.part_number)).toEqual(names);
-    json.parts.forEach((p: any, i: number) => expect(p.quantity_available).toBe(i));
+    const parts = allParts(json);
+    expect(parts.map((p: any) => p.part_number)).toEqual(names);
+    parts.forEach((p: any, i: number) => expect(p.available).toBe(i));
     expect(json.totals).toMatchObject({ found: 2000, not_attempted: 0, rate_limited: false });
   });
 
@@ -680,7 +731,7 @@ describe("lookupParts parallel batches", () => {
   it("after a 429: in-flight batches finish, no new batch starts, the rest are not_attempted", async () => {
     const names = partNames(2000);
     const { stub, gates, getClient } = gatedClient(3);
-    const done = lookupParts({ parts: names }, getClient);
+    const done = lookupParts({ parts: names, detail: "all" }, getClient);
     await flush();
     expect(stub.batchLookup).toHaveBeenCalledTimes(3);
 
@@ -706,18 +757,22 @@ describe("lookupParts parallel batches", () => {
       not_found: 0,
       errors: 300,
       not_attempted: 1100,
+      short_stock: 0,
+      below_moq: 0,
+      call_for_leadtime: 0,
       batches: 7,
       rate_limited: true,
     });
-    expect(json.parts.map((p: any) => p.part_number)).toEqual(names);
-    expect(json.parts.slice(0, 300).every((p: any) => p.status === "found")).toBe(true);
-    expect(json.parts.slice(600, 900).every((p: any) => p.status === "found")).toBe(true);
-    for (const p of json.parts.slice(300, 600)) {
+    const parts = allParts(json);
+    expect(parts.map((p: any) => p.part_number)).toEqual(names);
+    expect(parts.slice(0, 300).every((p: any) => p.status === "found")).toBe(true);
+    expect(parts.slice(600, 900).every((p: any) => p.status === "found")).toBe(true);
+    for (const p of parts.slice(300, 600)) {
       expect(p.status).toBe("error");
-      expect(p.error).toMatch(/^Rate limited/);
+      expect(p.reason).toMatch(/^error: Rate limited/);
     }
-    for (const p of json.parts.slice(900)) {
-      expect(p).toMatchObject({ status: "not_attempted", error: NOT_ATTEMPTED_MESSAGE });
+    for (const p of parts.slice(900)) {
+      expect(p).toMatchObject({ status: "not_attempted", reason: "not_attempted" });
     }
   });
 
@@ -732,7 +787,7 @@ describe("lookupParts parallel batches", () => {
     expect(stub.batchLookup).toHaveBeenCalledTimes(2);
     const json = parse(res);
     expect(res.isError).toBe(true);
-    expect(json.parts[300].error).toBe("Bad request.");
+    expect(asObjects(json.issues)[300].reason).toBe("error: Bad request.");
     expect(json.totals).toMatchObject({ errors: 600, not_attempted: 300, rate_limited: true });
   });
 
@@ -770,7 +825,7 @@ describe("lookupParts parallel batches", () => {
     const json = parse(res);
     expect(res.isError).toBe(true);
     expect(json.totals).toMatchObject({ errors: 2, not_attempted: 0, rate_limited: true });
-    expect(json.parts[0].error).toMatch(/^Rate limited/);
+    expect(json.issues.rows[0][2]).toMatch(/^error: Rate limited/);
   });
 
   it("flags isError when the first batch hits a 429 and every other batch is skipped", async () => {
@@ -845,5 +900,442 @@ describe("registerLookupPartsTool", () => {
     const getClient = providerFor(stubClient());
     registerLookupPartsTool(server, getClient);
     expect(() => registerLookupPartsTool(server, getClient)).toThrow();
+  });
+});
+
+// ---------- problems-first summary (issue #41) ----------
+
+/** The fixture's first offer: 12000 in stock, MOQ 1000, 12 Weeks, USD 0.42 at 1000-4999. */
+const fixtureOffer = (
+  JSON.parse(
+    readFileSync(new URL("../fixtures/part-lookup.json", import.meta.url), "utf8"),
+  ) as PartLookupResponse
+).offers![0]!;
+
+/** Every part gets `offerFor(part)` as its only offer; undefined means not found. */
+const fixtureClient = (offerFor: (p: string) => Offer | undefined = () => fixtureOffer) =>
+  stubClient(async (parts) => ({
+    lookup_parts: parts.map((p) => {
+      const o = offerFor(p);
+      return { part_number: p, offers: o ? [o] : [] };
+    }),
+  }));
+
+/** The fixture offer with stock, lead time or currency changed. */
+function variant(q: Record<string, unknown> = {}, currency?: string): Offer {
+  const o = structuredClone(fixtureOffer);
+  o.quantities = { ...o.quantities, ...q };
+  if (currency) o.currency = { currency_code: currency };
+  return o;
+}
+
+const withQty = (names: string[], quantity: number) =>
+  names.map((part_number) => ({ part_number, quantity }));
+
+/** A PartResult for unit tests. */
+const found = (extra: Partial<PartResult> = {}): PartResult => ({
+  part_number: "P1",
+  quantity: 100,
+  quantity_given: true,
+  status: "found",
+  quantity_available: 500,
+  quantity_minimum: 10,
+  lead_time: "12 Weeks",
+  currency_code: "USD",
+  price: { price_break: { from: 1, unit_price: 0.5 } },
+  ...extra,
+});
+
+/** Use the default budget (8000 tokens) rather than this file's roomy one. */
+const defaultBudget = () => vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "");
+
+describe("problemReasons", () => {
+  it("returns no reasons for a clean part", () => {
+    expect(problemReasons(found())).toEqual([]);
+  });
+
+  it("flags short_stock only when available < quantity", () => {
+    expect(problemReasons(found({ quantity_available: 99 }))).toEqual(["short_stock"]);
+    expect(problemReasons(found({ quantity_available: 100 }))).toEqual([]);
+    expect(problemReasons(found({ quantity_available: 0 }))).toEqual(["short_stock"]);
+    expect(problemReasons(found({ quantity_available: undefined }))).toEqual([]);
+  });
+
+  it("checks stock against the default quantity when none was given", () => {
+    const p = found({ quantity: 1, quantity_given: false, quantity_available: 0 });
+    expect(problemReasons(p)).toEqual(["short_stock"]);
+  });
+
+  it("flags below_moq only when a given quantity < quantity_minimum", () => {
+    expect(problemReasons(found({ quantity_minimum: 101 }))).toEqual(["below_moq"]);
+    expect(problemReasons(found({ quantity_minimum: 100 }))).toEqual([]);
+    expect(problemReasons(found({ quantity_minimum: undefined }))).toEqual([]);
+    expect(problemReasons(found({ quantity_minimum: 1000, quantity_given: false }))).toEqual([]);
+  });
+
+  it('flags call_for_leadtime for a "CALL" lead time', () => {
+    expect(problemReasons(found({ lead_time: "CALL" }))).toEqual(["call_for_leadtime"]);
+    expect(problemReasons(found({ lead_time: undefined }))).toEqual([]);
+  });
+
+  it("lists every reason that applies, in a fixed order", () => {
+    const p = found({ quantity_available: 5, quantity_minimum: 1000, lead_time: "CALL" });
+    expect(problemReasons(p)).toEqual(["short_stock", "below_moq", "call_for_leadtime"]);
+  });
+
+  it("reports not_found, not_attempted and error with its message", () => {
+    const base = { part_number: "X", quantity: 1, quantity_given: false } as const;
+    expect(problemReasons({ ...base, status: "not_found" })).toEqual(["not_found"]);
+    expect(problemReasons({ ...base, status: "not_attempted", error: "m" })).toEqual([
+      "not_attempted",
+    ]);
+    expect(problemReasons({ ...base, status: "error", error: "Bad request." })).toEqual([
+      "error: Bad request.",
+    ]);
+    expect(problemReasons({ ...base, status: "error" })).toEqual(["error: unknown"]);
+  });
+});
+
+describe("leadTimeDays / maxLeadTime", () => {
+  it.each([
+    ["12 Weeks", 84],
+    ["1 Week", 7],
+    ["5 days", 5],
+    ["2 Months", 60],
+    ["3", 21],
+    [" 4 weeks ", 28],
+    ["2.5 Weeks", 17.5],
+  ])("parses %j as %d days", (text, days) => {
+    expect(leadTimeDays(text)).toBe(days);
+  });
+
+  it.each([undefined, "", "CALL", "soon", "12 fortnights", "Weeks 12", "-3 Weeks"])(
+    "gives undefined for %j",
+    (text) => {
+      expect(leadTimeDays(text)).toBeUndefined();
+    },
+  );
+
+  it("picks the longest lead time across units, keeping its text", () => {
+    const parts = [
+      found({ lead_time: "12 Weeks" }),
+      found({ lead_time: "4 Months" }),
+      found({ lead_time: "100 Days" }),
+      found({ lead_time: "CALL" }),
+    ];
+    expect(maxLeadTime(parts)).toBe("4 Months");
+  });
+
+  it("keeps the first of equal lead times and ignores parts that were not found", () => {
+    expect(maxLeadTime([found({ lead_time: "2 Weeks" }), found({ lead_time: "14 Days" })])).toBe(
+      "2 Weeks",
+    );
+    const missing = { part_number: "X", quantity: 1, quantity_given: false, status: "not_found" };
+    expect(maxLeadTime([missing as PartResult])).toBeNull();
+    expect(maxLeadTime([found({ lead_time: "CALL" }), found({ lead_time: undefined })])).toBeNull();
+    expect(maxLeadTime([])).toBeNull();
+  });
+});
+
+describe("extendedCost", () => {
+  it("sums quantity x unit price per currency, rounded to cents", () => {
+    const parts = [
+      found({ quantity: 3, price: { price_break: { from: 1, unit_price: 0.1 } } }),
+      found({ quantity: 7, price: { price_break: { from: 1, unit_price: 0.2 } } }),
+      found({ quantity: 2, currency_code: "EUR", price: { price_break: { from: 1, unit_price: 1.005 } } }),
+    ];
+    expect(extendedCost(parts)).toEqual({ extended_cost: { USD: 1.7, EUR: 2.01 }, unpriced: 0 });
+  });
+
+  it("skips and counts found parts with no applicable price break", () => {
+    const parts = [
+      found({ price: { price_break: null, reason: "no_pricing" } }),
+      found({ price: { price_break: null, reason: "below_minimum", quantity_minimum: 500 } }),
+      found({ price: undefined }),
+      found({ quantity: 10 }),
+    ];
+    expect(extendedCost(parts)).toEqual({ extended_cost: { USD: 5 }, unpriced: 3 });
+  });
+
+  it("ignores parts that were not found and labels a missing currency UNKNOWN", () => {
+    const missing = { part_number: "X", quantity: 5, quantity_given: true, status: "not_found" };
+    const parts = [missing as PartResult, found({ quantity: 2, currency_code: undefined })];
+    expect(extendedCost(parts)).toEqual({ extended_cost: { UNKNOWN: 1 }, unpriced: 0 });
+    expect(extendedCost([])).toEqual({ extended_cost: {}, unpriced: 0 });
+  });
+});
+
+describe("partsTable", () => {
+  const parts = [
+    found({ part_number: "OK1" }),
+    found({ part_number: "SHORT", quantity_available: 1, lead_time: "CALL" }),
+    { part_number: "GONE", quantity: 1, quantity_given: false, status: "not_found" } as PartResult,
+  ];
+
+  it("lists only problem parts in the summary table", () => {
+    expect(partsTable(parts, false)).toEqual({
+      columns: ISSUE_COLUMNS,
+      rows: [
+        ["SHORT", "found", "short_stock;call_for_leadtime", 100, 1, "CALL"],
+        ["GONE", "not_found", "not_found", 1, null, null],
+      ],
+    });
+  });
+
+  it("lists every part with all columns when all is set", () => {
+    const table = partsTable(parts, true);
+    expect(table.columns).toEqual(PART_COLUMNS);
+    expect(table.rows).toEqual([
+      ["OK1", null, "found", "", 100, 500, 10, "12 Weeks", "USD", 0.5],
+      ["SHORT", null, "found", "short_stock;call_for_leadtime", 100, 1, 10, "CALL", "USD", 0.5],
+      ["GONE", null, "not_found", "not_found", 1, null, null, null, null, null],
+    ]);
+    expect(partsTable([], true)).toEqual({ columns: PART_COLUMNS, rows: [] });
+  });
+});
+
+describe("future_lookup_parts problems-first summary", () => {
+  it("describes the summary, the problem categories, detail and the budget", () => {
+    for (const word of [
+      "issues",
+      "totals",
+      "extended_cost",
+      "unpriced",
+      "max_lead_time",
+      "short_stock",
+      "below_moq",
+      "call_for_leadtime",
+      "not_attempted",
+      'detail "all"',
+      "FUTURE_MAX_OUTPUT_TOKENS",
+      "truncated",
+    ]) {
+      expect(LOOKUP_PARTS_DESCRIPTION).toContain(word);
+    }
+  });
+
+  it("lists detail with summary as the default", async () => {
+    const conn = await connect(providerFor(stubClient()));
+    open.push(conn);
+    const { tools } = await conn.client.listTools();
+    const detail = (tools.find((t) => t.name === LOOKUP_PARTS_TOOL_NAME)!.inputSchema
+      .properties as Record<string, any>).detail;
+    expect(detail.enum).toEqual(["summary", "all"]);
+    expect(detail.default).toBe("summary");
+  });
+
+  it("summarizes 2000 clean parts in under 1000 tokens, the same size as 100", async () => {
+    defaultBudget();
+    const big = await call(providerFor(fixtureClient()), { parts: withQty(partNames(2000), 1000) });
+    const small = await call(providerFor(fixtureClient()), { parts: withQty(partNames(100), 1000) });
+    expect(estimateTokens(big.text)).toBeLessThan(1000);
+    expect(Math.abs(big.text.length - small.text.length)).toBeLessThan(20);
+    expect(big.text).not.toContain("\n");
+    expect(big.json).toEqual({
+      note: PRICING_DISCLAIMER,
+      totals: {
+        requested: 2000,
+        unique: 2000,
+        found: 2000,
+        not_found: 0,
+        errors: 0,
+        not_attempted: 0,
+        short_stock: 0,
+        below_moq: 0,
+        call_for_leadtime: 0,
+        batches: 7,
+        rate_limited: false,
+      },
+      extended_cost: { USD: 840000 },
+      unpriced: 0,
+      max_lead_time: "12 Weeks",
+      issues: { columns: ISSUE_COLUMNS, rows: [] },
+    });
+  });
+
+  it("lists exactly the 50 problem parts among 2000, in input order", async () => {
+    defaultBudget();
+    const names = partNames(2000);
+    const problems = names.filter((_, i) => i % 40 === 7); // 50 parts
+    const kind = new Map(problems.map((p, i) => [p, i % 4]));
+    const stub = fixtureClient((p) => {
+      const k = kind.get(p);
+      if (k === 0) return undefined; // not_found
+      if (k === 1) return variant({ quantity_available: 10 }); // short_stock
+      if (k === 2) return variant({ factory_leadtime: "CALL" }); // call_for_leadtime
+      return fixtureOffer;
+    });
+    // Kind 3 asks for less than the MOQ of 1000.
+    const parts = names.map((p) => ({ part_number: p, quantity: kind.get(p) === 3 ? 10 : 1000 }));
+    const { json } = await call(providerFor(stub), { parts });
+    expect(json.issues.rows.map((r: any[]) => r[0])).toEqual(problems);
+    expect(json.truncated).toBeUndefined();
+    expect(json.totals).toMatchObject({
+      found: 2000 - 13,
+      not_found: 13,
+      short_stock: 13,
+      call_for_leadtime: 12,
+      below_moq: 12,
+    });
+    const reasons = asObjects(json.issues).map((r) => r.reason);
+    expect(reasons.slice(0, 4)).toEqual(["not_found", "short_stock", "call_for_leadtime", "below_moq"]);
+  });
+
+  it("detects every problem category, several reasons per part, and errors", async () => {
+    const stub = fixtureClient((p) => {
+      if (p === "SHORT") return variant({ quantity_available: 999 });
+      if (p === "CALLLT") return variant({ factory_leadtime: " call " });
+      if (p === "MULTI") return variant({ quantity_available: 5, factory_leadtime: "CALL" });
+      if (p === "MISS") return undefined;
+      return fixtureOffer;
+    });
+    const { json } = await call(providerFor(stub), {
+      parts: [
+        { part_number: "OKAY", quantity: 1000 },
+        { part_number: "SHORT", quantity: 1000 },
+        { part_number: "MOQ", quantity: 999 },
+        { part_number: "CALLLT", quantity: 1000 },
+        { part_number: "MULTI", quantity: 10 },
+        "MISS",
+        "ab",
+        "NOQTY", // MOQ 1000 but no quantity given: not below_moq
+      ],
+    });
+    expect(asObjects(json.issues)).toEqual([
+      { part_number: "SHORT", status: "found", reason: "short_stock", quantity: 1000, available: 999, lead_time: "12 Weeks" },
+      { part_number: "MOQ", status: "found", reason: "below_moq", quantity: 999, available: 12000, lead_time: "12 Weeks" },
+      { part_number: "CALLLT", status: "found", reason: "call_for_leadtime", quantity: 1000, available: 12000, lead_time: "CALL" },
+      {
+        part_number: "MULTI",
+        status: "found",
+        reason: "short_stock;below_moq;call_for_leadtime",
+        quantity: 10,
+        available: 5,
+        lead_time: "CALL",
+      },
+      { part_number: "MISS", status: "not_found", reason: "not_found", quantity: 1, available: null, lead_time: null },
+      {
+        part_number: "ab",
+        status: "error",
+        reason: "error: Part number must contain at least 3 alphanumeric characters.",
+        quantity: 1,
+        available: null,
+        lead_time: null,
+      },
+    ]);
+    expect(json.totals).toMatchObject({
+      found: 6,
+      not_found: 1,
+      errors: 1,
+      short_stock: 2,
+      below_moq: 2,
+      call_for_leadtime: 2,
+    });
+    // MOQ (999) and MULTI (10) are below the lowest price break, so unpriced.
+    expect(json.unpriced).toBe(3); // NOQTY (qty 1) too
+    expect(json.extended_cost).toEqual({ USD: 3 * 1000 * 0.42 });
+  });
+
+  it("lists not_attempted parts with a retry note after an unrecovered 429", async () => {
+    let n = 0;
+    const stub = fixtureClient();
+    const inner = stub.batchLookup.getMockImplementation()!;
+    stub.batchLookup.mockImplementation(async (parts: string[]) => {
+      if (++n === 2) throw rateLimitError();
+      return inner(parts);
+    });
+    const names = partNames(601);
+    const { json } = await call(providerFor(stub), { parts: withQty(names, 1000) });
+    expect(json.totals).toMatchObject({ found: 300, errors: 300, not_attempted: 1, rate_limited: true });
+    expect(json.issues.rows).toHaveLength(301);
+    expect(json.issues.rows.at(-1)).toEqual(["PART-0600", "not_attempted", "not_attempted", 1000, null, null]);
+    expect(json.not_attempted_note).toBe(NOT_ATTEMPTED_MESSAGE);
+  });
+
+  it("omits not_attempted_note when every batch ran", async () => {
+    const { json } = await call(providerFor(fixtureClient()), { parts: ["LM317T"] });
+    expect(json.not_attempted_note).toBeUndefined();
+  });
+
+  it("reports extended cost per currency when currencies are mixed", async () => {
+    const stub = fixtureClient((p) => (p.startsWith("EU") ? variant({}, "EUR") : fixtureOffer));
+    const { json } = await call(providerFor(stub), {
+      parts: [
+        { part_number: "US1", quantity: 1000 },
+        { part_number: "EU1", quantity: 5000 },
+        { part_number: "EU2", quantity: 2000 },
+      ],
+    });
+    expect(json.extended_cost).toEqual({ USD: 420, EUR: 5000 * 0.37 + 2000 * 0.42 });
+    expect(json.unpriced).toBe(0);
+  });
+
+  it('caps detail "all" at the default budget with an explicit truncation note', async () => {
+    defaultBudget();
+    const names = partNames(2000);
+    const { text, json, res } = await call(providerFor(fixtureClient()), {
+      parts: withQty(names, 1000),
+      detail: "all",
+    });
+    expect(res.isError).toBeFalsy();
+    expect(text.length).toBeLessThanOrEqual(8000 * 4);
+    expect(json.truncated.hint).toBe(TRUNCATION_HINT);
+    expect(json.truncated.omitted + json.parts.rows.length).toBe(2000);
+    expect(json.parts.rows.map((r: any[]) => r[0])).toEqual(names.slice(0, json.parts.rows.length));
+    expect(json.totals.found).toBe(2000);
+    expect(json.extended_cost).toEqual({ USD: 840000 });
+  });
+
+  it("caps a long issues table too, keeping the totals whole", async () => {
+    defaultBudget();
+    const { text, json } = await call(providerFor(fixtureClient(() => undefined)), {
+      parts: partNames(2000),
+    });
+    expect(text.length).toBeLessThanOrEqual(32000);
+    expect(json.totals.not_found).toBe(2000);
+    expect(json.truncated.omitted + json.issues.rows.length).toBe(2000);
+  });
+
+  it.each([1000, 2500, 100000])("never exceeds FUTURE_MAX_OUTPUT_TOKENS=%d", async (budget) => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", String(budget));
+    const names = partNames(2000);
+    for (const args of [
+      { parts: names, detail: "all" },
+      { parts: names, raw: true },
+      { parts: names },
+    ]) {
+      const { text } = await call(providerFor(fixtureClient(() => undefined)), args);
+      expect(text.length).toBeLessThanOrEqual(budget * 4);
+    }
+  });
+
+  it("applies the budget to raw output, dropping whole batches", async () => {
+    defaultBudget();
+    const { text, json } = await call(providerFor(fixtureClient()), {
+      parts: partNames(2000),
+      raw: true,
+    });
+    expect(text.length).toBeLessThanOrEqual(32000);
+    expect(json.batches).toEqual([]);
+    expect(json.truncated).toEqual({ omitted: 7, hint: TRUNCATION_HINT });
+    expect(json.totals.found).toBe(2000);
+  });
+
+  it("rejects an invalid FUTURE_MAX_OUTPUT_TOKENS before any lookup", async () => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "10");
+    const stub = fixtureClient();
+    const { res, text } = await call(providerFor(stub), { parts: ["LM317T"] });
+    expect(res.isError).toBe(true);
+    expect(text).toBe("FUTURE_MAX_OUTPUT_TOKENS must be an integer from 1000 to 100000.");
+    expect(stub.batchLookup).not.toHaveBeenCalled();
+  });
+
+  it("uses an explicit budget argument over the environment", async () => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "10");
+    const stub = fixtureClient(() => undefined);
+    const res = await lookupParts({ parts: partNames(2000) }, providerFor(stub), 1000);
+    const text = (res.content[0] as { text: string }).text;
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(JSON.parse(text).truncated.omitted).toBeGreaterThan(0);
   });
 });

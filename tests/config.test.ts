@@ -6,9 +6,13 @@ import {
   ConfigError,
   DEFAULT_BASE_URL,
   MAX_CONCURRENCY_DEFAULT,
+  MAX_OUTPUT_TOKENS_DEFAULT,
+  MAX_OUTPUT_TOKENS_MAX,
+  MAX_OUTPUT_TOKENS_MIN,
   MIN_REQUEST_INTERVAL_DEFAULT_MS,
   defaultWorkspaceDir,
   loadConfig,
+  loadMaxOutputTokens,
   loadWorkspaceDir,
   parseIntSetting,
   validateBaseUrl,
@@ -255,6 +259,51 @@ describe("loadWorkspaceDir", () => {
     } finally {
       if (saved === undefined) delete process.env.FUTURE_WORKSPACE_DIR;
       else process.env.FUTURE_WORKSPACE_DIR = saved;
+    }
+  });
+});
+
+describe("loadMaxOutputTokens", () => {
+  it("defaults to 8000 when unset or blank", () => {
+    expect(MAX_OUTPUT_TOKENS_DEFAULT).toBe(8000);
+    expect(loadMaxOutputTokens({})).toBe(8000);
+    expect(loadMaxOutputTokens({ FUTURE_MAX_OUTPUT_TOKENS: "  " })).toBe(8000);
+  });
+
+  it("does not need an API key", () => {
+    expect(loadMaxOutputTokens({ FUTURE_MAX_OUTPUT_TOKENS: "5000" })).toBe(5000);
+  });
+
+  it("accepts the range bounds, trimmed", () => {
+    expect(MAX_OUTPUT_TOKENS_MIN).toBe(1000);
+    expect(MAX_OUTPUT_TOKENS_MAX).toBe(100000);
+    expect(loadMaxOutputTokens({ FUTURE_MAX_OUTPUT_TOKENS: "1000" })).toBe(1000);
+    expect(loadMaxOutputTokens({ FUTURE_MAX_OUTPUT_TOKENS: " 100000 " })).toBe(100000);
+  });
+
+  it.each(["999", "100001", "0", "-5", "8k", "1.5", "1e4", "abc"])(
+    "rejects %j without echoing it",
+    (value) => {
+      try {
+        loadMaxOutputTokens({ FUTURE_MAX_OUTPUT_TOKENS: value });
+        expect.unreachable();
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        expect((error as Error).message).toBe(
+          "FUTURE_MAX_OUTPUT_TOKENS must be an integer from 1000 to 100000.",
+        );
+      }
+    },
+  );
+
+  it("defaults to process.env", () => {
+    const saved = process.env.FUTURE_MAX_OUTPUT_TOKENS;
+    process.env.FUTURE_MAX_OUTPUT_TOKENS = "2500";
+    try {
+      expect(loadMaxOutputTokens()).toBe(2500);
+    } finally {
+      if (saved === undefined) delete process.env.FUTURE_MAX_OUTPUT_TOKENS;
+      else process.env.FUTURE_MAX_OUTPUT_TOKENS = saved;
     }
   });
 });
