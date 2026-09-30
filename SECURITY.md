@@ -24,6 +24,33 @@ documentation example.
   messages, or stack traces. Error handling must redact it.
 - Do not paste real keys into issues, pull requests, or agent prompts.
 
+### Agent GitHub App key
+
+Agent PRs are authored by a private GitHub App (see AGENTS.md, "Agent
+workflow"). Its private key is a secret under the same rules as the API key:
+never commit, paste, or log it.
+
+- It lives only in the maintainer's **macOS login Keychain**, as generic
+  passwords with the service `future-electronics-mcp-agent` and the accounts
+  `app-id`, `installation-id`, `app-slug`, and `private-key-b64` (the PEM,
+  base64-encoded). `scripts/agent-token.mjs --from-keychain` reads them with
+  `security find-generic-password` and prints only a short-lived (one-hour)
+  installation token. Its errors never include key material.
+- To store or replace the key:
+  ```bash
+  security add-generic-password -U -s future-electronics-mcp-agent \
+    -a private-key-b64 -w "$(base64 -i ~/Downloads/<app>.private-key.pem)"
+  ```
+  Then delete the downloaded `.pem` file.
+- **Rotate:** go to GitHub → Settings → Developer settings → GitHub Apps → the
+  App → Private keys, and click Generate a private key. Re-store it with the
+  command above, confirm that `node scripts/agent-token.mjs --from-keychain`
+  works, and then delete the old key on the same page.
+- **Revoke (suspected leak):** delete the key on that Private keys page right
+  away. That stops it from signing new JWTs. Installation tokens that were
+  already issued expire within an hour. To cut them off sooner, suspend or
+  uninstall the App (the repository's Settings → GitHub Apps).
+
 ### If a key is committed or exposed
 
 1. Treat the key as compromised. Contact Future Electronics to revoke or
