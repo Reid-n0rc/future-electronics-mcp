@@ -152,7 +152,7 @@ separate filesystem connector.
 
 ## MCP tools
 
-Both tools are read-only. Every summary carries a `note` saying that pricing is
+All tools are read-only. Every summary carries a `note` saying that pricing is
 not an official quote.
 
 ### Output budget
@@ -260,6 +260,9 @@ Behavior:
 not with the size of the BOM. Each part is judged on its best offer (the one
 with the most stock) at its quantity (1 when none was given):
 
+- `result_id`: the id of the full stored result. Pass it to
+  [`future_query_results`](#future_query_results) to read any other rows or
+  columns without calling the API again.
 - `note` and `totals`: `requested`, `unique`, `found`, `not_found`, `errors`,
   `not_attempted`, `short_stock`, `below_moq`, `call_for_leadtime`, `batches`,
   and `rate_limited`.
@@ -291,7 +294,7 @@ none), `quantity`, `available`, `moq`, `lead_time`, `currency`, and
 `unit_price` (null when no price break applies). Long tables are cut by the
 [output budget](#output-budget), with a `truncated` note.
 
-With `raw: true` the output is `note`, `totals`, `batches[]` in input order
+With `raw: true` the output is `result_id`, `note`, `totals`, `batches[]` in input order
 (each `{part_numbers, response}`, `{part_numbers, error}`, or
 `{part_numbers, not_attempted: true, error}` for a batch skipped after a rate
 limit), and `invalid_parts[]` when any were rejected. A 300-part raw batch is
@@ -303,6 +306,7 @@ Example, from the synthetic batch fixture (`parts: ["TEST-0000",
 
 ```json
 {
+  "result_id": "3f0c2a9e-5b7d-4c1e-9a8f-2d6b1e4c7a90",
   "note": "Pricing is not an official quote. Confirm price and availability with Future Electronics before ordering.",
   "totals": {
     "requested": 2, "unique": 2, "found": 1, "not_found": 1, "errors": 0,
@@ -321,6 +325,36 @@ Example, from the synthetic batch fixture (`parts: ["TEST-0000",
   }
 }
 ```
+
+### `future_query_results`
+
+Read any part of a stored `future_lookup_parts` result by its `result_id`,
+**without calling the Future API**. Use it to page through every part, pull
+extra columns, or filter a BOM instead of re-running the lookup.
+
+| Input                 | Type     | Default  | Limits and notes                                                        |
+|-----------------------|----------|----------|-------------------------------------------------------------------------|
+| `result_id`           | string   | required | From a `future_lookup_parts` result.                                     |
+| `status`              | string[] | none     | Keep parts with any of: `found`, `not_found`, `error`, `not_attempted`.  |
+| `min_lead_time_weeks` | number   | none     | Keep parts whose lead time is at least this many weeks. `"CALL"` and unknown lead times are excluded. |
+| `short_stock`         | boolean  | none     | `true`: only short-stock parts. `false`: only parts without that problem. |
+| `below_moq`           | boolean  | none     | `true`: only below-MOQ parts. `false`: only parts without that problem.  |
+| `part_numbers`        | string[] | none     | Keep these part numbers (case-insensitive).                              |
+| `fields`              | string[] | all      | Columns to return, in order: `part_number`, `mpn`, `status`, `reason`, `quantity`, `available`, `moq`, `lead_time`, `currency`, `unit_price`. An unknown name is rejected with the list of valid ones. |
+| `offset`              | integer  | `0`      | Matching rows to skip.                                                   |
+| `limit`               | integer  | `50`     | 1 to 500 rows.                                                           |
+
+Filters combine with AND. The output is `result_id`, `note`,
+`total_matching` (after filters, before paging), `offset`, `next_offset`
+(`null` on the last page), and a `{columns, rows}` table in input order. It is
+capped by the [output budget](#output-budget); when rows are dropped,
+`truncated` says so and `next_offset` points at the first dropped row.
+
+Results live **in memory only**, never on disk. Each expires 60 minutes after
+it was last stored or queried, at most 20 are kept (the least recently used is
+evicted first), and all are lost when the server restarts. An unknown or
+expired `result_id` returns an `isError` result saying to run
+`future_lookup_parts` again. The id is a random UUID.
 
 ## Errors
 
