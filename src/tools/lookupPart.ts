@@ -6,6 +6,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { loadMaxOutputTokens } from "../config.js";
 import {
   PRICING_DISCLAIMER,
   priceAt,
@@ -16,11 +17,16 @@ import {
 } from "../format.js";
 import type { Offer, PartLookupResponse } from "../types.js";
 import { LookupTypeSchema } from "../types.js";
-import { errorResult, jsonResult, type ClientProvider } from "./common.js";
+import { budgetedResult } from "../output.js";
+import { errorResult, type ClientProvider } from "./common.js";
 
 export const LOOKUP_PART_TOOL_NAME = "future_lookup_part";
 export const DEFAULT_MAX_OFFERS = 10;
 export const MAX_MAX_OFFERS = 50;
+/** Hint attached when the output budget drops offers. */
+export const OFFERS_TRUNCATION_HINT =
+  "Offers were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Lower max_offers, use " +
+  "lookup_type exact, or raise FUTURE_MAX_OUTPUT_TOKENS.";
 
 export const LOOKUP_PART_DESCRIPTION = [
   "Look up one electronic component in the Future Electronics catalog by manufacturer part number (MPN).",
@@ -30,6 +36,7 @@ export const LOOKUP_PART_DESCRIPTION = [
   `Pricing matches the Future website and is NOT an official quote: ${PRICING_DISCLAIMER}`,
   "lookup_type defaults to exact, which matches the full part number. Use starts_with when you know only the beginning of the MPN (for example a base part without its packaging or temperature suffix), and contains when you know a fragment from the middle. Those return more, less precise offers, so check the mpn of each result.",
   "Set raw to true only when you need upstream fields the summary omits; it returns the untouched API response (offers still truncated to max_offers) and ignores quantity.",
+  "Output is compact JSON capped at FUTURE_MAX_OUTPUT_TOKENS: if offers must be dropped to fit, the last ones go and truncated {omitted, hint} says how many.",
   "For many parts at once, use future_lookup_parts instead.",
 ].join(" ");
 
@@ -114,8 +121,10 @@ export function registerLookupPartTool(server: McpServer, getClient: ClientProvi
     },
     async (input) => {
       try {
+        const budget = loadMaxOutputTokens();
         const resp = await getClient().lookup(input.part_number, input.lookup_type);
-        return jsonResult(buildLookupPartResult(resp, input));
+        const value = buildLookupPartResult(resp, input) as Record<string, unknown>;
+        return budgetedResult(value, ["offers"], budget, OFFERS_TRUNCATION_HINT);
       } catch (error) {
         return errorResult(error);
       }

@@ -13,6 +13,7 @@ import {
   LOOKUP_PART_DESCRIPTION,
   LOOKUP_PART_TOOL_NAME,
   MAX_MAX_OFFERS,
+  OFFERS_TRUNCATION_HINT,
   buildLookupPartResult,
   registerLookupPartTool,
 } from "../../src/tools/lookupPart.js";
@@ -339,5 +340,72 @@ describe("buildLookupPartResult", () => {
     const resp = { offers: [null] } as unknown as PartLookupResponse;
     const out = buildLookupPartResult(resp, { ...base, quantity: 1 }) as any;
     expect(out.offers).toEqual([{ price_at_quantity: { price_break: null, reason: "no_pricing" } }]);
+  });
+});
+
+describe("tools/call: compact output and the output budget", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** A response with `n` copies of the fixture's first (large) offer. */
+  const bigResponse = (n: number): PartLookupResponse => ({
+    ...clone(fixture),
+    offers: Array.from({ length: n }, () => clone(fixture.offers![0]!)),
+  });
+
+  it("returns compact JSON without whitespace", async () => {
+    const client = await connect(providerFor(stubClient()));
+    const out = text(await call(client, { part_number: "TEST-1234" }));
+    expect(out).not.toContain("\n");
+    expect(out).toBe(JSON.stringify(JSON.parse(out)));
+  });
+
+  it("describes the budget and truncation note", () => {
+    expect(LOOKUP_PART_DESCRIPTION).toContain("FUTURE_MAX_OUTPUT_TOKENS");
+    expect(LOOKUP_PART_DESCRIPTION).toMatch(/truncated \{omitted, hint\}/);
+  });
+
+  it("drops offers from the end to fit the budget and says so", async () => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "1000");
+    const client = await connect(providerFor(stubClient(async () => bigResponse(50))));
+    const result = await call(client, { part_number: "TEST-1234", max_offers: 50, quantity: 1000 });
+    expect(result.isError).toBeFalsy();
+    expect(text(result).length).toBeLessThanOrEqual(4000);
+    const out = json(result);
+    expect(out.total_offers).toBe(50);
+    expect(out.offers.length).toBeGreaterThan(0);
+    expect(out.truncated).toEqual({
+      omitted: 50 - out.offers.length,
+      hint: OFFERS_TRUNCATION_HINT,
+    });
+    expect(out.offers[0].price_at_quantity).toBeDefined();
+  });
+
+  it("applies the budget to raw output too", async () => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "1000");
+    const client = await connect(providerFor(stubClient(async () => bigResponse(50))));
+    const result = await call(client, { part_number: "TEST-1234", max_offers: 50, raw: true });
+    expect(text(result).length).toBeLessThanOrEqual(4000);
+    expect(json(result).truncated.omitted).toBeGreaterThan(40);
+    expect(json(result).lookup_value).toBe(fixture.lookup_value);
+  });
+
+  it("leaves a result that fits untouched, with no truncation note", async () => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "100000");
+    const client = await connect(providerFor(stubClient(async () => bigResponse(50))));
+    const out = json(await call(client, { part_number: "TEST-1234", max_offers: 50 }));
+    expect(out.offers).toHaveLength(50);
+    expect(out.truncated).toBeUndefined();
+  });
+
+  it("rejects an invalid FUTURE_MAX_OUTPUT_TOKENS before calling the API", async () => {
+    vi.stubEnv("FUTURE_MAX_OUTPUT_TOKENS", "abc");
+    const stub = stubClient();
+    const client = await connect(providerFor(stub));
+    const result = await call(client, { part_number: "TEST-1234" });
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe("FUTURE_MAX_OUTPUT_TOKENS must be an integer from 1000 to 100000.");
+    expect(stub.lookup).not.toHaveBeenCalled();
   });
 });

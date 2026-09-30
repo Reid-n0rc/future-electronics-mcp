@@ -114,6 +114,25 @@ export function parseIntSetting(
   return parsed;
 }
 
+/** `FUTURE_MAX_OUTPUT_TOKENS` default and allowed range (tokens estimated as chars / 4). */
+export const MAX_OUTPUT_TOKENS_DEFAULT = 8_000;
+export const MAX_OUTPUT_TOKENS_MIN = 1_000;
+export const MAX_OUTPUT_TOKENS_MAX = 100_000;
+
+/**
+ * Reads `FUTURE_MAX_OUTPUT_TOKENS`: the most tokens one tool result may use.
+ * Independent of the API key, so it can be read without one.
+ */
+export function loadMaxOutputTokens(env: NodeJS.ProcessEnv = process.env): number {
+  return parseIntSetting(
+    env.FUTURE_MAX_OUTPUT_TOKENS,
+    "FUTURE_MAX_OUTPUT_TOKENS",
+    MAX_OUTPUT_TOKENS_DEFAULT,
+    MAX_OUTPUT_TOKENS_MIN,
+    MAX_OUTPUT_TOKENS_MAX,
+  );
+}
+
 /** Folder name of the default workspace (issue #40). */
 export const WORKSPACE_FOLDER_NAME = "Future Electronics MCP";
 

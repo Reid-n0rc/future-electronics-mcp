@@ -22,14 +22,20 @@
 //   FutureApiError with status 429 means the client's retries are exhausted,
 //   so no new batch starts. Batches already in flight finish and are reported
 //   normally; batches never started are reported as `not_attempted`.
+// - Output is problems-first (issue #41): totals, extended cost and the
+//   longest lead time, plus an `issues` table listing only problem parts, so
+//   its size grows with the number of problems, not with the BOM. Every
+//   result is compact JSON capped by FUTURE_MAX_OUTPUT_TOKENS (src/output.ts).
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { FutureApiError, MAX_BATCH_PARTS, validatePartNumber } from "../client.js";
+import { loadMaxOutputTokens } from "../config.js";
 import { PRICING_DISCLAIMER, priceAt, summarizeOffer, type PriceAtResult } from "../format.js";
+import { budgetedResult } from "../output.js";
 import type { BatchLookupPart, BatchLookupResponse, Offer } from "../types.js";
-import { errorResult, jsonResult, type ClientProvider } from "./common.js";
+import { errorResult, type ClientProvider } from "./common.js";
 
 export const LOOKUP_PARTS_TOOL_NAME = "future_lookup_parts";
 export const MAX_LOOKUP_PARTS = 2000;
@@ -63,17 +69,25 @@ export const lookupPartsInputShape = {
         `{"part_number": "LM317T", "quantity": 500}. Quantity is optional (positive integer) ` +
         "and selects the price break; duplicates are merged and their quantities summed.",
     ),
+  detail: z
+    .enum(["summary", "all"])
+    .default("summary")
+    .describe(
+      '"summary" (default): totals plus a table of problem parts only. "all": a table row for ' +
+        "every part. Both are capped by the output budget.",
+    ),
   raw: z
     .boolean()
     .default(false)
     .describe(
-      "Return the untouched upstream batch responses instead of per-part summaries. Much larger; " +
-        "use only when a field missing from the summary is needed.",
+      "Return the untouched upstream batch responses instead of the summary. Far larger, so " +
+        "whole batches are usually dropped by the output budget; use only for one small batch.",
     ),
 };
 
 export type LookupPartsInput = {
   parts: Array<string | { part_number: string; quantity?: number }>;
+  detail?: "summary" | "all";
   raw?: boolean;
 };
 
@@ -82,16 +96,27 @@ export const LOOKUP_PARTS_DESCRIPTION =
   `Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. ` +
   "Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are " +
   `summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. ` +
-  'Returns one entry per unique part, in input order, with status "found", "not_found", ' +
-  '"error" or "not_attempted". For found ' +
-  "parts it reports the best offer (the one with the most stock): quantity_available, lead_time, " +
-  "and price, the price break that applies at the requested quantity (quantity 1 when none is " +
-  'given; price_break is null with a reason such as "below_minimum" when it does not apply). ' +
-  "If one batch fails, its parts get the error and the rest are still returned. If the API rate " +
-  "limit is still hit after retries, the lookup stops early: batches already running finish, and " +
-  'parts in batches not yet started are marked "not_attempted" (retry them later; ' +
-  "totals.rate_limited is true). Totals summarize the run. Prices are not an official quote. " +
-  "Use the single-part lookup tool for full offer details of one part.";
+  "Each part is judged on its best offer (the most stock) at the requested quantity (1 when none " +
+  "is given). By default it returns exceptions and totals, not every part: totals (requested, " +
+  "unique, found, not_found, errors, not_attempted, short_stock, below_moq, call_for_leadtime, " +
+  "batches, rate_limited), extended_cost (quantity x applicable unit price, summed per currency), " +
+  "unpriced (found parts with no applicable price break, left out of extended_cost), " +
+  "max_lead_time, and an issues table {columns, rows} listing ONLY problem parts. Problems: " +
+  "short_stock (available < quantity), below_moq (a given quantity < the minimum order), " +
+  'call_for_leadtime (lead time "CALL"), not_found, error, not_attempted; one part can have ' +
+  'several, joined by ";" in its reason. Parts with no problem appear only in the counts. ' +
+  'detail "all" returns a parts table with a row for every part instead. Output is capped at ' +
+  "FUTURE_MAX_OUTPUT_TOKENS: when rows are dropped, truncated {omitted, hint} says so. If one " +
+  "batch fails, its parts get the error and the rest are still returned. If the API rate limit " +
+  "is still hit after retries, the lookup stops early: batches already running finish, and " +
+  'parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited ' +
+  "is true). Prices are not an official quote. Use the single-part lookup tool for full offer " +
+  "details of one part.";
+
+/** Hint attached when the output budget drops rows. */
+export const TRUNCATION_HINT =
+  "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Look up the omitted parts " +
+  "in a smaller request, or raise FUTURE_MAX_OUTPUT_TOKENS.";
 
 export type PartStatus = "found" | "not_found" | "error" | "not_attempted";
 
@@ -99,10 +124,13 @@ export interface PartResult {
   part_number: string;
   /** Quantity used for pricing (requested total, or DEFAULT_QUANTITY). */
   quantity: number;
+  /** True when the caller gave a quantity (below_moq is judged only then). */
+  quantity_given: boolean;
   status: PartStatus;
   offer_count?: number;
   mpn?: string;
   quantity_available?: number;
+  quantity_minimum?: number;
   lead_time?: string;
   currency_code?: string;
   price?: PriceAtResult;
@@ -116,9 +144,114 @@ export interface LookupTotals {
   not_found: number;
   errors: number;
   not_attempted: number;
+  short_stock: number;
+  below_moq: number;
+  call_for_leadtime: number;
   batches: number;
   /** True when an unrecovered HTTP 429 stopped the lookup early. */
   rate_limited: boolean;
+}
+
+/** Compact table: column names plus one array of cells per row. */
+export interface Table {
+  columns: string[];
+  rows: Array<Array<string | number | null>>;
+}
+
+export const ISSUE_COLUMNS = ["part_number", "status", "reason", "quantity", "available", "lead_time"];
+export const PART_COLUMNS = [
+  "part_number", "mpn", "status", "reason", "quantity", "available", "moq", "lead_time",
+  "currency", "unit_price",
+];
+
+/**
+ * Problem reasons for one part; empty when it has none. short_stock:
+ * available < quantity. below_moq: a caller-given quantity < the offer's
+ * quantity_minimum. call_for_leadtime: lead time "CALL". Unknown stock or
+ * minimum is not a problem.
+ */
+export function problemReasons(p: PartResult): string[] {
+  if (p.status === "not_found" || p.status === "not_attempted") return [p.status];
+  if (p.status === "error") return [`error: ${p.error ?? "unknown"}`];
+  const out: string[] = [];
+  if (p.quantity_available !== undefined && p.quantity_available < p.quantity) out.push("short_stock");
+  if (p.quantity_given && p.quantity_minimum !== undefined && p.quantity < p.quantity_minimum) {
+    out.push("below_moq");
+  }
+  if (p.lead_time === "CALL") out.push("call_for_leadtime");
+  return out;
+}
+
+const LEAD_UNIT_DAYS: Record<string, number> = { day: 1, week: 7, month: 30 };
+
+/**
+ * A lead time such as "12 Weeks" in days, for comparison. A bare number is
+ * taken as weeks. "CALL", unknown units and unparseable text give undefined.
+ */
+export function leadTimeDays(leadTime: string | undefined): number | undefined {
+  const m = /^(\d+(?:\.\d+)?)\s*([a-z]*)$/i.exec(leadTime?.trim() ?? "");
+  if (!m) return undefined;
+  const unit = m[2]!.toLowerCase().replace(/s$/, "");
+  const factor = unit === "" ? LEAD_UNIT_DAYS.week : LEAD_UNIT_DAYS[unit];
+  return factor === undefined ? undefined : Number(m[1]) * factor;
+}
+
+/** The longest parseable lead time among found parts, as reported, or null. */
+export function maxLeadTime(parts: PartResult[]): string | null {
+  let best: string | null = null;
+  let bestDays = -1;
+  for (const p of parts) {
+    const days = p.status === "found" ? leadTimeDays(p.lead_time) : undefined;
+    if (days !== undefined && days > bestDays) {
+      best = p.lead_time!;
+      bestDays = days;
+    }
+  }
+  return best;
+}
+
+/**
+ * Sum of quantity x applicable unit price over found parts, per currency code
+ * (rounded to cents). Found parts with no applicable price break are skipped
+ * and counted in `unpriced`.
+ */
+export function extendedCost(parts: PartResult[]): {
+  extended_cost: Record<string, number>;
+  unpriced: number;
+} {
+  const sums: Record<string, number> = {};
+  let unpriced = 0;
+  for (const p of parts) {
+    if (p.status !== "found") continue;
+    const brk = p.price?.price_break;
+    if (!brk) {
+      unpriced++;
+      continue;
+    }
+    const currency = p.currency_code ?? "UNKNOWN";
+    sums[currency] = (sums[currency] ?? 0) + p.quantity * brk.unit_price;
+  }
+  for (const k of Object.keys(sums)) sums[k] = Math.round((sums[k]! + Number.EPSILON) * 100) / 100;
+  return { extended_cost: sums, unpriced };
+}
+
+/** Issues table (problem parts only) or, with `all`, a row for every part. */
+export function partsTable(parts: PartResult[], all: boolean): Table {
+  const rows: Table["rows"] = [];
+  for (const p of parts) {
+    const reason = problemReasons(p).join(";");
+    if (!all && reason === "") continue;
+    const available = p.quantity_available ?? null;
+    const lead = p.lead_time ?? null;
+    rows.push(
+      all
+        ? [p.part_number, p.mpn ?? null, p.status, reason, p.quantity, available,
+            p.quantity_minimum ?? null, lead, p.currency_code ?? null,
+            p.price?.price_break?.unit_price ?? null]
+        : [p.part_number, p.status, reason, p.quantity, available, lead],
+    );
+  }
+  return { columns: all ? PART_COLUMNS : ISSUE_COLUMNS, rows };
 }
 
 interface UniquePart {
@@ -196,16 +329,19 @@ function partResult(part: UniquePart, entry: BatchLookupPart | undefined): PartR
   const quantity = part.quantity ?? DEFAULT_QUANTITY;
   const offers = Array.isArray(entry?.offers) ? entry.offers : [];
   const best = bestOffer(offers);
-  if (!best) return { part_number: part.part_number, quantity, status: "not_found" };
+  const quantity_given = part.quantity !== undefined;
+  if (!best) return { part_number: part.part_number, quantity, quantity_given, status: "not_found" };
   const s = summarizeOffer(best);
   const result: PartResult = {
     part_number: part.part_number,
     quantity,
+    quantity_given,
     status: "found",
     offer_count: offers.length,
   };
   if (s.mpn !== undefined) result.mpn = s.mpn;
   if (s.quantity_available !== undefined) result.quantity_available = s.quantity_available;
+  if (s.quantity_minimum !== undefined) result.quantity_minimum = s.quantity_minimum;
   if (s.lead_time !== undefined) result.lead_time = s.lead_time;
   if (s.currency_code !== undefined) result.currency_code = s.currency_code;
   result.price = priceAt(best, quantity);
@@ -232,6 +368,7 @@ function errorPart(part: UniquePart, message: string, status: PartStatus = "erro
   return {
     part_number: part.part_number,
     quantity: part.quantity ?? DEFAULT_QUANTITY,
+    quantity_given: part.quantity !== undefined,
     status,
     error: message,
   };
@@ -241,7 +378,14 @@ function errorPart(part: UniquePart, message: string, status: PartStatus = "erro
 export async function lookupParts(
   input: LookupPartsInput,
   getClient: ClientProvider,
+  maxOutputTokens?: number,
 ): Promise<CallToolResult> {
+  let budget: number;
+  try {
+    budget = maxOutputTokens ?? loadMaxOutputTokens();
+  } catch (error) {
+    return errorResult(error);
+  }
   const unique = dedupeParts(input.parts);
   const results = new Map<string, PartResult>();
   const sendable: UniquePart[] = [];
@@ -306,6 +450,8 @@ export async function lookupParts(
 
   const parts = unique.map((p) => results.get(p.part_number)!);
   const count = (s: PartStatus) => parts.filter((p) => p.status === s).length;
+  const reasons = parts.map(problemReasons);
+  const countReason = (r: string) => reasons.filter((rs) => rs.includes(r)).length;
   const totals: LookupTotals = {
     requested: input.parts.length,
     unique: unique.length,
@@ -313,6 +459,9 @@ export async function lookupParts(
     not_found: count("not_found"),
     errors: count("error"),
     not_attempted: count("not_attempted"),
+    short_stock: countReason("short_stock"),
+    below_moq: countReason("below_moq"),
+    call_for_leadtime: countReason("call_for_leadtime"),
     batches: chunks.length,
     rate_limited: rateLimited,
   };
@@ -321,16 +470,32 @@ export async function lookupParts(
   const invalid = parts
     .filter((p) => !sent.has(p.part_number))
     .map((p) => ({ part_number: p.part_number, error: p.error }));
-  const body = input.raw
-    ? {
-        note: PRICING_DISCLAIMER,
-        totals,
-        batches: rawBatches,
-        ...(invalid.length > 0 ? { invalid_parts: invalid } : {}),
-      }
-    : { note: PRICING_DISCLAIMER, totals, parts };
-
-  const result = jsonResult(body);
+  const all = input.detail === "all";
+  const result = input.raw
+    ? budgetedResult(
+        {
+          note: PRICING_DISCLAIMER,
+          totals,
+          batches: rawBatches,
+          ...(invalid.length > 0 ? { invalid_parts: invalid } : {}),
+        },
+        ["batches", "invalid_parts"],
+        budget,
+        TRUNCATION_HINT,
+      )
+    : budgetedResult(
+        {
+          note: PRICING_DISCLAIMER,
+          totals,
+          ...extendedCost(parts),
+          max_lead_time: maxLeadTime(parts),
+          ...(totals.not_attempted > 0 ? { not_attempted_note: NOT_ATTEMPTED_MESSAGE } : {}),
+          [all ? "parts" : "issues"]: partsTable(parts, all),
+        },
+        [all ? "parts.rows" : "issues.rows"],
+        budget,
+        TRUNCATION_HINT,
+      );
   // Nothing succeeded: every batch failed or was skipped, or every part was invalid.
   if (succeeded === 0) result.isError = true;
   return result;
