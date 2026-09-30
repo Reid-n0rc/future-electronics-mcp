@@ -22158,6 +22158,7 @@ var LOOKUP_PARTS_TOOL_NAME = "future_lookup_parts";
 var MAX_LOOKUP_PARTS = 2e3;
 var MAX_QUANTITY = 1e9;
 var DEFAULT_QUANTITY = 1;
+var NOT_ATTEMPTED_MESSAGE = "Not attempted: the Future API rate limit was reached. Retry these parts later.";
 var partNumberSchema = external_exports.string().refine((s) => s.trim() !== "", { message: "Part number must not be empty or whitespace." });
 var partItemSchema = external_exports.union([
   partNumberSchema,
@@ -22174,7 +22175,7 @@ var lookupPartsInputShape = {
     "Return the untouched upstream batch responses instead of per-part summaries. Much larger; use only when a field missing from the summary is needed."
   )
 };
-var LOOKUP_PARTS_DESCRIPTION = `Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are summed), then sent in batches of ${MAX_BATCH_PARTS}. Returns one entry per unique part with status "found", "not_found" or "error". For found parts it reports the best offer (the one with the most stock): quantity_available, lead_time, and price, the price break that applies at the requested quantity (quantity 1 when none is given; price_break is null with a reason such as "below_minimum" when it does not apply). If one batch fails, its parts get the error and the rest are still returned. Totals summarize the run. Prices are not an official quote. Use the single-part lookup tool for full offer details of one part.`;
+var LOOKUP_PARTS_DESCRIPTION = `Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. Returns one entry per unique part, in input order, with status "found", "not_found", "error" or "not_attempted". For found parts it reports the best offer (the one with the most stock): quantity_available, lead_time, and price, the price break that applies at the requested quantity (quantity 1 when none is given; price_break is null with a reason such as "below_minimum" when it does not apply). If one batch fails, its parts get the error and the rest are still returned. If the API rate limit is still hit after retries, the lookup stops early: batches already running finish, and parts in batches not yet started are marked "not_attempted" (retry them later; totals.rate_limited is true). Totals summarize the run. Prices are not an official quote. Use the single-part lookup tool for full offer details of one part.`;
 function dedupeParts(parts) {
   const byKey = /* @__PURE__ */ new Map();
   for (const item of parts) {
@@ -22243,6 +22244,21 @@ function partResult(part, entry) {
   result.price = priceAt(best, quantity);
   return result;
 }
+function poolSize(client) {
+  const n = client?.maxConcurrency;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : 1;
+}
+function isRateLimit(error2) {
+  return error2 instanceof FutureApiError && error2.status === 429;
+}
+function errorPart(part, message, status = "error") {
+  return {
+    part_number: part.part_number,
+    quantity: part.quantity ?? DEFAULT_QUANTITY,
+    status,
+    error: message
+  };
+}
 async function lookupParts(input, getClient) {
   const unique = dedupeParts(input.parts);
   const results = /* @__PURE__ */ new Map();
@@ -22252,12 +22268,7 @@ async function lookupParts(input, getClient) {
       validatePartNumber(part.part_number);
       sendable.push(part);
     } catch (error2) {
-      results.set(part.part_number, {
-        part_number: part.part_number,
-        quantity: part.quantity ?? DEFAULT_QUANTITY,
-        status: "error",
-        error: failureMessage(error2)
-      });
+      results.set(part.part_number, errorPart(part, failureMessage(error2)));
     }
   }
   let client;
@@ -22269,30 +22280,40 @@ async function lookupParts(input, getClient) {
     }
   }
   const chunks = chunk(sendable, MAX_BATCH_PARTS);
-  const rawBatches = [];
+  const rawBatches = new Array(chunks.length);
+  let next = 0;
   let succeeded = 0;
-  for (const group of chunks) {
+  let rateLimited = false;
+  const runBatch = async (index) => {
+    const group = chunks[index];
     const names = group.map((p) => p.part_number);
     try {
       const resp = await client.batchLookup(names);
       succeeded++;
-      rawBatches.push({ part_numbers: names, response: resp });
+      rawBatches[index] = { part_numbers: names, response: resp };
       group.forEach((p, i) => {
         results.set(p.part_number, partResult(p, matchResponse(resp, p.part_number, i)));
       });
     } catch (error2) {
+      if (isRateLimit(error2)) rateLimited = true;
       const message = failureMessage(error2);
-      rawBatches.push({ part_numbers: names, error: message });
-      for (const p of group) {
-        results.set(p.part_number, {
-          part_number: p.part_number,
-          quantity: p.quantity ?? DEFAULT_QUANTITY,
-          status: "error",
-          error: message
-        });
-      }
+      rawBatches[index] = { part_numbers: names, error: message };
+      for (const p of group) results.set(p.part_number, errorPart(p, message));
     }
-  }
+  };
+  const worker = async () => {
+    while (!rateLimited && next < chunks.length) await runBatch(next++);
+  };
+  const workers = Math.min(poolSize(client), chunks.length);
+  await Promise.all(Array.from({ length: workers }, worker));
+  chunks.forEach((group, index) => {
+    if (rawBatches[index] !== void 0) return;
+    const names = group.map((p) => p.part_number);
+    rawBatches[index] = { part_numbers: names, not_attempted: true, error: NOT_ATTEMPTED_MESSAGE };
+    for (const p of group) {
+      results.set(p.part_number, errorPart(p, NOT_ATTEMPTED_MESSAGE, "not_attempted"));
+    }
+  });
   const parts = unique.map((p) => results.get(p.part_number));
   const count = (s) => parts.filter((p) => p.status === s).length;
   const totals = {
@@ -22301,7 +22322,9 @@ async function lookupParts(input, getClient) {
     found: count("found"),
     not_found: count("not_found"),
     errors: count("error"),
-    batches: chunks.length
+    not_attempted: count("not_attempted"),
+    batches: chunks.length,
+    rate_limited: rateLimited
   };
   const sent = new Set(sendable.map((s) => s.part_number));
   const invalid = parts.filter((p) => !sent.has(p.part_number)).map((p) => ({ part_number: p.part_number, error: p.error }));
