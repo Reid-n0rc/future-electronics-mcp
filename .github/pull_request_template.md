@@ -8,6 +8,7 @@ Closes #
 ## Checklist
 - [ ] Branch is `issue-<n>-<slug>`, based on `dev`, PR targets `dev`
 - [ ] Linked issue has the `plan-approved` label
+- [ ] Linked issue is assigned to the person who did the work
 - [ ] Every new/changed function has thorough tests (happy path, edge cases, invalid input, errors)
 - [ ] Regression tests for changed modules + dependents pass, and `npm run typecheck` passes
 - [ ] No keys, tokens, or `.env` files included (see SECURITY.md)
