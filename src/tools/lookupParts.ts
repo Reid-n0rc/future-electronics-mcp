@@ -30,11 +30,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { BomFileError, bomFileSchema, loadBomFile, type BomFileSpec, type BomSource } from "../bomFile.js";
 import { FutureApiError, MAX_BATCH_PARTS, validatePartNumber } from "../client.js";
 import { loadMaxOutputTokens } from "../config.js";
 import { PRICING_DISCLAIMER, priceAt, summarizeOffer, type PriceAtResult } from "../format.js";
 import { budgetedResult } from "../output.js";
 import type { BatchLookupPart, BatchLookupResponse, Offer } from "../types.js";
+import { WorkspaceError } from "../workspace.js";
 import { errorResult, type ClientProvider } from "./common.js";
 
 export const LOOKUP_PARTS_TOOL_NAME = "future_lookup_parts";
@@ -64,10 +66,18 @@ export const lookupPartsInputShape = {
     .array(partItemSchema)
     .min(1)
     .max(MAX_LOOKUP_PARTS)
+    .optional()
     .describe(
       `1-${MAX_LOOKUP_PARTS} manufacturer part numbers. Each item is a string ("LM317T") or ` +
         `{"part_number": "LM317T", "quantity": 500}. Quantity is optional (positive integer) ` +
-        "and selects the price break; duplicates are merged and their quantities summed.",
+        "and selects the price break; duplicates are merged and their quantities summed. " +
+        "Give exactly one of parts or bom_file.",
+    ),
+  bom_file: bomFileSchema
+    .optional()
+    .describe(
+      "Read the parts from a .csv/.tsv file in the workspace folder instead of listing them " +
+        "(future_list_bom_files lists the files). Give exactly one of parts or bom_file.",
     ),
   detail: z
     .enum(["summary", "all"])
@@ -86,7 +96,8 @@ export const lookupPartsInputShape = {
 };
 
 export type LookupPartsInput = {
-  parts: Array<string | { part_number: string; quantity?: number }>;
+  parts?: Array<string | { part_number: string; quantity?: number }>;
+  bom_file?: BomFileSpec;
   detail?: "summary" | "all";
   raw?: boolean;
 };
@@ -111,7 +122,18 @@ export const LOOKUP_PARTS_DESCRIPTION =
   "is still hit after retries, the lookup stops early: batches already running finish, and " +
   'parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited ' +
   "is true). Prices are not an official quote. Use the single-part lookup tool for full offer " +
-  "details of one part.";
+  "details of one part. Instead of parts, bom_file reads a CSV/TSV BOM from the workspace " +
+  "folder (part and quantity columns auto-detected by header); the result then includes " +
+  "source {file, rows_read, rows_skipped, part_column, quantity_column}.";
+
+const hasExactlyOneInput = (v: { parts?: unknown; bom_file?: unknown }) =>
+  (v.parts === undefined) !== (v.bom_file === undefined);
+const EXACTLY_ONE_MESSAGE = "Give exactly one of parts or bom_file.";
+
+/** Full input schema, with the exactly-one-of refinement the raw shape cannot carry. */
+export const lookupPartsInputSchema = z
+  .object(lookupPartsInputShape)
+  .refine(hasExactlyOneInput, { message: EXACTLY_ONE_MESSAGE });
 
 /** Hint attached when the output budget drops rows. */
 export const TRUNCATION_HINT =
@@ -263,7 +285,7 @@ interface UniquePart {
  * Trim and dedupe case-insensitively, keeping first-seen order and spelling.
  * Quantities of duplicates are summed; entries without a quantity add nothing.
  */
-export function dedupeParts(parts: LookupPartsInput["parts"]): UniquePart[] {
+export function dedupeParts(parts: NonNullable<LookupPartsInput["parts"]>): UniquePart[] {
   const byKey = new Map<string, UniquePart>();
   for (const item of parts) {
     const raw = typeof item === "string" ? item : item.part_number;
@@ -374,6 +396,53 @@ function errorPart(part: UniquePart, message: string, status: PartStatus = "erro
   };
 }
 
+type PartItem = NonNullable<LookupPartsInput["parts"]>[number];
+const MAX_ROW_ERRORS = 10;
+
+/**
+ * The part list to look up: inline `parts`, or the rows of `bom_file` checked
+ * with the same item schema and the same limit (applied after dedupe).
+ */
+export async function resolveParts(
+  input: LookupPartsInput,
+  root?: string,
+): Promise<{ items: PartItem[]; source?: BomSource } | CallToolResult> {
+  const fail = (text: string): CallToolResult => ({ content: [{ type: "text", text }], isError: true });
+  if (!hasExactlyOneInput(input)) return fail(EXACTLY_ONE_MESSAGE);
+  if (input.parts) return { items: input.parts };
+  let bom;
+  try {
+    bom = await loadBomFile(input.bom_file!, root);
+  } catch (error) {
+    if (error instanceof BomFileError || error instanceof WorkspaceError) return fail(error.message);
+    return errorResult(error);
+  }
+  const { rows, source } = bom;
+  const items: PartItem[] = [];
+  const bad: string[] = [];
+  for (const r of rows) {
+    const q = r.quantity === undefined ? undefined : /^\d+(\.\d+)?$/.test(r.quantity) ? Number(r.quantity) : NaN;
+    const parsed = partItemSchema.safeParse(q === undefined ? { part_number: r.part_number } : { part_number: r.part_number, quantity: q });
+    if (parsed.success) items.push(parsed.data);
+    else bad.push(`row ${r.row} (${JSON.stringify(r.quantity?.slice(0, 20))})`);
+  }
+  if (bad.length > 0) {
+    const more = bad.length > MAX_ROW_ERRORS ? `, and ${bad.length - MAX_ROW_ERRORS} more` : "";
+    return fail(
+      `Invalid quantity in ${bad.slice(0, MAX_ROW_ERRORS).join(", ")}${more}. A quantity must be a ` +
+        `whole number from 1 to ${MAX_QUANTITY}, or empty.`,
+    );
+  }
+  if (items.length === 0) {
+    return fail(`No part numbers found in ${JSON.stringify(source.file)} (${source.rows_read} rows read, ${source.rows_skipped} skipped).`);
+  }
+  const unique = dedupeParts(items).length;
+  if (unique > MAX_LOOKUP_PARTS) {
+    return fail(`The file has ${unique} unique part numbers; the limit is ${MAX_LOOKUP_PARTS}. Split the file.`);
+  }
+  return { items, source };
+}
+
 /** Run the lookup. Exported for tests; the MCP handler wraps it. */
 export async function lookupParts(
   input: LookupPartsInput,
@@ -386,7 +455,10 @@ export async function lookupParts(
   } catch (error) {
     return errorResult(error);
   }
-  const unique = dedupeParts(input.parts);
+  const resolved = await resolveParts(input);
+  if ("content" in resolved) return resolved;
+  const { items, source } = resolved;
+  const unique = dedupeParts(items);
   const results = new Map<string, PartResult>();
   const sendable: UniquePart[] = [];
   for (const part of unique) {
@@ -453,7 +525,7 @@ export async function lookupParts(
   const reasons = parts.map(problemReasons);
   const countReason = (r: string) => reasons.filter((rs) => rs.includes(r)).length;
   const totals: LookupTotals = {
-    requested: input.parts.length,
+    requested: items.length,
     unique: unique.length,
     found: count("found"),
     not_found: count("not_found"),
@@ -475,6 +547,7 @@ export async function lookupParts(
     ? budgetedResult(
         {
           note: PRICING_DISCLAIMER,
+          ...(source ? { source } : {}),
           totals,
           batches: rawBatches,
           ...(invalid.length > 0 ? { invalid_parts: invalid } : {}),
@@ -486,6 +559,7 @@ export async function lookupParts(
     : budgetedResult(
         {
           note: PRICING_DISCLAIMER,
+          ...(source ? { source } : {}),
           totals,
           ...extendedCost(parts),
           max_lead_time: maxLeadTime(parts),
