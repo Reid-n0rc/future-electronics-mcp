@@ -230,27 +230,39 @@ Behavior:
   quantity are priced at quantity 1.
 - Parts with fewer than 3 alphanumeric characters are reported as `error` and
   never sent.
-- The rest are sent sequentially in batches of up to 300. A failed batch marks
-  only its own parts as `error`; the other batches still run.
+- The rest are sent in batches of up to 300. Up to `FUTURE_MAX_CONCURRENCY`
+  batches (default 4) run in parallel, started in input order; the output
+  order never depends on which batch finishes first. A failed batch marks only
+  its own parts as `error`; the other batches still run.
+- If a batch still gets HTTP 429 after the client's retries, the lookup stops
+  early: no new batch starts, batches already running finish and are reported
+  normally, and the parts of batches never started get status
+  `not_attempted` with `error: "Not attempted: the Future API rate limit was
+  reached. Retry these parts later."`. `totals.rate_limited` is then `true`.
 - The call is flagged as an error only when nothing succeeded (every batch
-  failed, or every part was invalid).
+  failed or was not attempted, or every part was invalid).
 
 **Output:** `note`, `totals` (`requested`, `unique`, `found`, `not_found`,
-`errors`, `batches`), and `parts[]`, one per unique part, in input order. Each
-has `part_number`, `quantity`, and `status` (`found`, `not_found`, or
-`error`). Found parts add `offer_count` and details from the best offer (the
-one with the most stock): `mpn`, `quantity_available`, `lead_time`,
-`currency_code`, and `price` (the same shape as `price_at_quantity` above).
-Error parts add `error`. With `raw: true` the output is `note`, `totals`,
-`batches[]` (each `{part_numbers, response}` or `{part_numbers, error}`), and
-`invalid_parts[]` when any were rejected.
+`errors`, `not_attempted`, `batches`, `rate_limited`), and `parts[]`, one per
+unique part, in input order. Each has `part_number`, `quantity`, and `status`
+(`found`, `not_found`, `error`, or `not_attempted`). Found parts add
+`offer_count` and details from the best offer (the one with the most stock):
+`mpn`, `quantity_available`, `lead_time`, `currency_code`, and `price` (the
+same shape as `price_at_quantity` above). Error and not-attempted parts add
+`error`. With `raw: true` the output is `note`, `totals`, `batches[]` in input
+order (each `{part_numbers, response}`, `{part_numbers, error}`, or
+`{part_numbers, not_attempted: true, error}` for a batch skipped after a rate
+limit), and `invalid_parts[]` when any were rejected.
 
 Example, from the synthetic batch fixture (`parts: ["TEST-0000", "TEST-5678"]`):
 
 ```json
 {
   "note": "Pricing is not an official quote. Confirm price and availability with Future Electronics before ordering.",
-  "totals": { "requested": 2, "unique": 2, "found": 1, "not_found": 1, "errors": 0, "batches": 1 },
+  "totals": {
+    "requested": 2, "unique": 2, "found": 1, "not_found": 1, "errors": 0,
+    "not_attempted": 0, "batches": 1, "rate_limited": false
+  },
   "parts": [
     { "part_number": "TEST-0000", "quantity": 1, "status": "not_found" },
     {
@@ -306,9 +318,9 @@ when it sends one.
   your API access; changing the key's format won't help.
 - **429 (rate limited).** The client already retries twice, honoring
   `Retry-After` (capped at 30 s) or backing off exponentially. If you still get
-  429, wait before retrying and send fewer calls. `future_lookup_parts` sends
-  its batches one after another for this reason, so prefer one large call over
-  many small ones. If 429s keep happening, lower `FUTURE_MAX_CONCURRENCY` (for
+  429, wait before retrying and send fewer calls. `future_lookup_parts` stops
+  starting new batches after such a 429 and marks the rest `not_attempted`;
+  retry just those parts later. Prefer one large call over many small ones. If 429s keep happening, lower `FUTURE_MAX_CONCURRENCY` (for
   example to `1` or `2`) or set `FUTURE_MIN_REQUEST_INTERVAL_MS` (for example
   `500`) to space requests out, then restart the server.
 - **The server doesn't start, or `dist/index.js` is not found.** Run

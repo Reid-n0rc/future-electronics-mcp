@@ -11,10 +11,12 @@ import {
   DEFAULT_QUANTITY,
   LOOKUP_PARTS_TOOL_NAME,
   MAX_LOOKUP_PARTS,
+  NOT_ATTEMPTED_MESSAGE,
   bestOffer,
   chunk,
   dedupeParts,
   lookupParts,
+  poolSize,
   registerLookupPartsTool,
 } from "../../src/tools/lookupParts.js";
 import type { BatchLookupResponse, Offer } from "../../src/types.js";
@@ -191,7 +193,9 @@ describe("lookupParts", () => {
       found: 0,
       not_found: 0,
       errors: 2,
+      not_attempted: 0,
       batches: 0,
+      rate_limited: false,
     });
     expect(json.parts[0].error).toMatch(/at least 3 alphanumeric/);
   });
@@ -220,7 +224,7 @@ describe("future_lookup_parts over MCP", () => {
     expect(tool!.annotations?.readOnlyHint).toBe(true);
   });
 
-  it("splits 650 unique parts into exactly 3 sequential calls of 300/300/50", async () => {
+  it("splits 650 parts into 3 sequential calls when maxConcurrency is absent", async () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const stub = stubClient(async (parts) => {
@@ -245,7 +249,9 @@ describe("future_lookup_parts over MCP", () => {
       found: 650,
       not_found: 0,
       errors: 0,
+      not_attempted: 0,
       batches: 3,
+      rate_limited: false,
     });
     expect(json.parts).toHaveLength(650);
     expect(json.note).toBe(PRICING_DISCLAIMER);
@@ -363,14 +369,14 @@ describe("future_lookup_parts over MCP", () => {
     expect(json.parts[1]).toMatchObject({ status: "found", quantity_available: 2 });
   });
 
-  it("still returns the other chunks when the middle chunk fails", async () => {
+  it("still returns the other chunks when the middle chunk fails with a non-429 error", async () => {
     let n = 0;
     const stub = stubClient(async (parts) => {
       n++;
       if (n === 2) {
-        throw new FutureApiError("Rate limited: too many requests to the Future API. Try again later.", {
+        throw new FutureApiError("Future API request failed with HTTP 503.", {
           code: "http",
-          status: 429,
+          status: 503,
         });
       }
       return echoResponse(parts);
@@ -385,13 +391,50 @@ describe("future_lookup_parts over MCP", () => {
       found: 350,
       not_found: 0,
       errors: 300,
+      not_attempted: 0,
       batches: 3,
+      rate_limited: false,
     });
     expect(json.parts.slice(0, 300).every((p: any) => p.status === "found")).toBe(true);
     expect(json.parts.slice(600).every((p: any) => p.status === "found")).toBe(true);
     for (const p of json.parts.slice(300, 600)) {
       expect(p.status).toBe("error");
+      expect(p.error).toBe("Future API request failed with HTTP 503.");
+    }
+  });
+
+  it("stops after an unrecovered 429 when sequential: later batches are not_attempted", async () => {
+    let n = 0;
+    const stub = stubClient(async (parts) => {
+      n++;
+      if (n === 2) throw rateLimitError();
+      return echoResponse(parts);
+    });
+    const names = partNames(650);
+    const { res, json } = await call(providerFor(stub), { parts: names });
+    expect(res.isError).toBeFalsy();
+    expect(stub.batchLookup).toHaveBeenCalledTimes(2);
+    expect(json.totals).toEqual({
+      requested: 650,
+      unique: 650,
+      found: 300,
+      not_found: 0,
+      errors: 300,
+      not_attempted: 50,
+      batches: 3,
+      rate_limited: true,
+    });
+    for (const p of json.parts.slice(300, 600)) {
+      expect(p.status).toBe("error");
       expect(p.error).toMatch(/^Rate limited/);
+    }
+    for (const p of json.parts.slice(600)) {
+      expect(p).toEqual({
+        part_number: p.part_number,
+        quantity: 1,
+        status: "not_attempted",
+        error: NOT_ATTEMPTED_MESSAGE,
+      });
     }
   });
 
@@ -492,6 +535,307 @@ describe("future_lookup_parts over MCP", () => {
     );
     expect(res.isError).toBe(true);
     expect(text).toBe("FUTURE_API_KEY is not set.");
+  });
+});
+
+// ---------- parallel batches (deterministic: gated batchLookup, no timers) ----------
+
+function rateLimitError() {
+  return new FutureApiError("Rate limited: too many requests to the Future API. Try again later.", {
+    code: "http",
+    status: 429,
+  });
+}
+
+type Gate = {
+  parts: string[];
+  resolve: (r: BatchLookupResponse) => void;
+  reject: (e: unknown) => void;
+};
+
+/** A client whose batchLookup calls stay pending until the test settles them. */
+function gatedClient(maxConcurrency?: unknown) {
+  const gates: Gate[] = [];
+  const state = { inFlight: 0, peak: 0 };
+  const batchLookup = vi.fn(
+    (parts: string[]) =>
+      new Promise<BatchLookupResponse>((resolve, reject) => {
+        state.inFlight++;
+        state.peak = Math.max(state.peak, state.inFlight);
+        gates.push({
+          parts,
+          resolve: (r) => {
+            state.inFlight--;
+            resolve(r);
+          },
+          reject: (e) => {
+            state.inFlight--;
+            reject(e);
+          },
+        });
+      }),
+  );
+  const stub =
+    maxConcurrency === undefined
+      ? { lookup: vi.fn(), batchLookup }
+      : { lookup: vi.fn(), batchLookup, maxConcurrency };
+  const getClient: ClientProvider = () => stub as unknown as FutureClient;
+  return { stub, gates, state, getClient };
+}
+
+/** Drain pending microtasks (one macrotask turn; not a time-based timer). */
+const flush = () => new Promise<void>((r) => setImmediate(r));
+
+/** Found response whose stock encodes the part's input index, to check placement. */
+const indexedResponse =
+  (names: string[]) =>
+  (parts: string[]): BatchLookupResponse => ({
+    lookup_parts: parts.map((p) => ({ part_number: p, offers: [offer(names.indexOf(p))] })),
+  });
+
+const parse = (res: { content: unknown }) =>
+  JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+
+describe("poolSize", () => {
+  it("uses a positive integer maxConcurrency", () => {
+    expect(poolSize({ maxConcurrency: 1 })).toBe(1);
+    expect(poolSize({ maxConcurrency: 4 })).toBe(4);
+  });
+
+  it.each([undefined, 0, -2, 1.5, Number.NaN, Infinity, "4", null])(
+    "defaults to 1 for maxConcurrency %s",
+    (value) => {
+      expect(poolSize({ maxConcurrency: value })).toBe(1);
+    },
+  );
+
+  it("defaults to 1 for a missing client or a stub without the getter", () => {
+    expect(poolSize(undefined)).toBe(1);
+    expect(poolSize({})).toBe(1);
+  });
+
+  it("reads the real FutureClient getter", () => {
+    expect(poolSize(new FutureClient({ apiKey: "test-key", maxConcurrency: 3 }))).toBe(3);
+    expect(poolSize(new FutureClient({ apiKey: "test-key" }))).toBe(4);
+  });
+});
+
+describe("lookupParts parallel batches", () => {
+  it("runs 2000 parts (7 batches) at most 4 at a time and keeps input order", async () => {
+    const names = partNames(2000);
+    const respond = indexedResponse(names);
+    const { stub, gates, state, getClient } = gatedClient(4);
+    const done = lookupParts({ parts: names }, getClient);
+    await flush();
+    expect(stub.batchLookup).toHaveBeenCalledTimes(4);
+    expect(state.inFlight).toBe(4);
+
+    // Finish out of order; each completion frees one slot for the next batch in order.
+    for (const i of [3, 1, 0, 2, 6, 4, 5]) {
+      await flush();
+      expect(state.inFlight).toBeLessThanOrEqual(4);
+      gates[i]!.resolve(respond(gates[i]!.parts));
+    }
+    const res = await done;
+    expect(state.peak).toBe(4);
+    expect(stub.batchLookup).toHaveBeenCalledTimes(7);
+    // Batches were dispatched in input order.
+    expect(gates.map((g) => g.parts[0])).toEqual([0, 1, 2, 3, 4, 5, 6].map((b) => names[b * 300]));
+    expect(gates.map((g) => g.parts.length)).toEqual([300, 300, 300, 300, 300, 300, 200]);
+
+    const json = parse(res);
+    expect(res.isError).toBeFalsy();
+    expect(json.parts.map((p: any) => p.part_number)).toEqual(names);
+    json.parts.forEach((p: any, i: number) => expect(p.quantity_available).toBe(i));
+    expect(json.totals).toMatchObject({ found: 2000, not_attempted: 0, rate_limited: false });
+  });
+
+  it("with maxConcurrency 1 matches the sequential (no maxConcurrency) output exactly", async () => {
+    const names = [...partNames(650), "MISS-1", "x"];
+    const one = gatedClient(1);
+    const doneOne = lookupParts({ parts: names }, one.getClient);
+    for (let i = 0; i < 3; i++) {
+      await flush();
+      expect(one.stub.batchLookup).toHaveBeenCalledTimes(i + 1);
+      one.gates[i]!.resolve(echoResponse(one.gates[i]!.parts));
+    }
+    const resOne = await doneOne;
+    expect(one.state.peak).toBe(1);
+
+    const seq = await lookupParts({ parts: names }, providerFor(stubClient()));
+    expect(resOne).toEqual(seq);
+  });
+
+  it("uses no more workers than batches when maxConcurrency is large", async () => {
+    const { stub, gates, state, getClient } = gatedClient(10);
+    const done = lookupParts({ parts: partNames(301) }, getClient);
+    await flush();
+    expect(stub.batchLookup).toHaveBeenCalledTimes(2);
+    gates.forEach((g) => g.resolve(echoResponse(g.parts)));
+    const json = parse(await done);
+    expect(state.peak).toBe(2);
+    expect(json.totals).toMatchObject({ found: 301, batches: 2 });
+  });
+
+  it("after a 429: in-flight batches finish, no new batch starts, the rest are not_attempted", async () => {
+    const names = partNames(2000);
+    const { stub, gates, getClient } = gatedClient(3);
+    const done = lookupParts({ parts: names }, getClient);
+    await flush();
+    expect(stub.batchLookup).toHaveBeenCalledTimes(3);
+
+    gates[1]!.reject(rateLimitError());
+    await flush();
+    // The freed worker must not start batch 3.
+    expect(stub.batchLookup).toHaveBeenCalledTimes(3);
+    gates[0]!.resolve(echoResponse(gates[0]!.parts));
+    await flush();
+    gates[2]!.resolve(echoResponse(gates[2]!.parts));
+    const res = await done;
+
+    expect(stub.batchLookup).toHaveBeenCalledTimes(3);
+    const called = new Set(stub.batchLookup.mock.calls.flatMap((c) => c[0] as string[]));
+    for (const n of names.slice(900)) expect(called.has(n)).toBe(false);
+
+    const json = parse(res);
+    expect(res.isError).toBeFalsy();
+    expect(json.totals).toEqual({
+      requested: 2000,
+      unique: 2000,
+      found: 600,
+      not_found: 0,
+      errors: 300,
+      not_attempted: 1100,
+      batches: 7,
+      rate_limited: true,
+    });
+    expect(json.parts.map((p: any) => p.part_number)).toEqual(names);
+    expect(json.parts.slice(0, 300).every((p: any) => p.status === "found")).toBe(true);
+    expect(json.parts.slice(600, 900).every((p: any) => p.status === "found")).toBe(true);
+    for (const p of json.parts.slice(300, 600)) {
+      expect(p.status).toBe("error");
+      expect(p.error).toMatch(/^Rate limited/);
+    }
+    for (const p of json.parts.slice(900)) {
+      expect(p).toMatchObject({ status: "not_attempted", error: NOT_ATTEMPTED_MESSAGE });
+    }
+  });
+
+  it("reports an in-flight batch that fails after the 429 with its own error", async () => {
+    const { stub, gates, getClient } = gatedClient(2);
+    const done = lookupParts({ parts: partNames(900) }, getClient);
+    await flush();
+    gates[0]!.reject(rateLimitError());
+    await flush();
+    gates[1]!.reject(new FutureApiError("Bad request.", { code: "http", status: 400 }));
+    const res = await done;
+    expect(stub.batchLookup).toHaveBeenCalledTimes(2);
+    const json = parse(res);
+    expect(res.isError).toBe(true);
+    expect(json.parts[300].error).toBe("Bad request.");
+    expect(json.totals).toMatchObject({ errors: 600, not_attempted: 300, rate_limited: true });
+  });
+
+  it("keeps going after non-429 errors when parallel", async () => {
+    const { stub, gates, getClient } = gatedClient(4);
+    const done = lookupParts({ parts: partNames(2000) }, getClient);
+    await flush();
+    gates[0]!.reject(
+      new FutureApiError("Future API request failed with HTTP 500.", { code: "http", status: 500 }),
+    );
+    // A plain error that merely carries status 429 is not an unrecovered rate limit.
+    gates[1]!.reject(Object.assign(new Error("boom"), { status: 429 }));
+    for (let i = 2; i < 7; i++) {
+      await flush();
+      gates[i]!.resolve(echoResponse(gates[i]!.parts));
+    }
+    const res = await done;
+    expect(stub.batchLookup).toHaveBeenCalledTimes(7);
+    const json = parse(res);
+    expect(res.isError).toBeFalsy();
+    expect(json.totals).toMatchObject({
+      found: 1400,
+      errors: 600,
+      not_attempted: 0,
+      rate_limited: false,
+    });
+  });
+
+  it("flags isError when a 429 hits the only batch", async () => {
+    const { gates, getClient } = gatedClient(4);
+    const done = lookupParts({ parts: ["LM317T", "NE555"] }, getClient);
+    await flush();
+    gates[0]!.reject(rateLimitError());
+    const res = await done;
+    const json = parse(res);
+    expect(res.isError).toBe(true);
+    expect(json.totals).toMatchObject({ errors: 2, not_attempted: 0, rate_limited: true });
+    expect(json.parts[0].error).toMatch(/^Rate limited/);
+  });
+
+  it("flags isError when the first batch hits a 429 and every other batch is skipped", async () => {
+    const { stub, gates, getClient } = gatedClient(1);
+    const done = lookupParts({ parts: partNames(700) }, getClient);
+    await flush();
+    gates[0]!.reject(rateLimitError());
+    const res = await done;
+    expect(stub.batchLookup).toHaveBeenCalledTimes(1);
+    expect(res.isError).toBe(true);
+    expect(parse(res).totals).toMatchObject({ errors: 300, not_attempted: 400, batches: 3 });
+  });
+
+  it("lists not-attempted batches in raw mode, in input order", async () => {
+    const names = [...partNames(1200), "x"];
+    const { gates, getClient } = gatedClient(2);
+    const done = lookupParts({ parts: names, raw: true }, getClient);
+    await flush();
+    gates[1]!.resolve(echoResponse(gates[1]!.parts));
+    await flush();
+    // Batch 2 started when batch 1 finished; now batch 0 hits the rate limit.
+    gates[0]!.reject(rateLimitError());
+    await flush();
+    gates[2]!.resolve(echoResponse(gates[2]!.parts));
+    const json = parse(await done);
+    expect(gates).toHaveLength(3);
+    expect(json.parts).toBeUndefined();
+    expect(json.batches).toHaveLength(4);
+    expect(json.batches[0]).toEqual({
+      part_numbers: names.slice(0, 300),
+      error: "Rate limited: too many requests to the Future API. Try again later.",
+    });
+    expect(json.batches[1].response).toEqual(echoResponse(names.slice(300, 600)));
+    expect(json.batches[2].response).toEqual(echoResponse(names.slice(600, 900)));
+    expect(json.batches[3]).toEqual({
+      part_numbers: names.slice(900, 1200),
+      not_attempted: true,
+      error: NOT_ATTEMPTED_MESSAGE,
+    });
+    expect(json.invalid_parts).toEqual([
+      { part_number: "x", error: "Part number must contain at least 3 alphanumeric characters." },
+    ]);
+    expect(json.totals).toMatchObject({
+      found: 600,
+      errors: 301,
+      not_attempted: 300,
+      batches: 4,
+      rate_limited: true,
+    });
+  });
+
+  it("runs batches in parallel over MCP too", async () => {
+    const { stub, gates, state, getClient } = gatedClient(2);
+    const pending = call(getClient, { parts: partNames(900) });
+    while (gates.length < 2) await flush();
+    await flush();
+    expect(stub.batchLookup).toHaveBeenCalledTimes(2);
+    gates[0]!.resolve(echoResponse(gates[0]!.parts));
+    gates[1]!.resolve(echoResponse(gates[1]!.parts));
+    while (gates.length < 3) await flush();
+    gates[2]!.resolve(echoResponse(gates[2]!.parts));
+    const { res, json } = await pending;
+    expect(res.isError).toBeFalsy();
+    expect(state.peak).toBe(2);
+    expect(json.totals).toMatchObject({ found: 900, batches: 3, rate_limited: false });
   });
 });
 

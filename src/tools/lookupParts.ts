@@ -11,14 +11,22 @@
 // - Parts that fail the client's part-number check (fewer than 3 alphanumeric
 //   characters) are reported as errors and never sent, so one bad line cannot
 //   fail a whole batch of 300.
-// - Batches are sent sequentially (never in parallel) to avoid HTTP 429s. A
-//   failed batch marks each of its parts with that batch's error message and
-//   the remaining batches still run.
+// - Batches run in parallel through a small worker pool sized by the client's
+//   `maxConcurrency` (1 when the client does not expose it). Workers take
+//   batches in input order, and results are stored by index, so the output
+//   order never depends on completion order. The client's own limiter still
+//   caps in-flight requests; the pool only bounds how many batches this tool
+//   dispatches at once.
+// - A failed batch marks each of its parts with that batch's error message and
+//   the remaining batches still run, except after an unrecovered rate limit: a
+//   FutureApiError with status 429 means the client's retries are exhausted,
+//   so no new batch starts. Batches already in flight finish and are reported
+//   normally; batches never started are reported as `not_attempted`.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { MAX_BATCH_PARTS, validatePartNumber } from "../client.js";
+import { FutureApiError, MAX_BATCH_PARTS, validatePartNumber } from "../client.js";
 import { PRICING_DISCLAIMER, priceAt, summarizeOffer, type PriceAtResult } from "../format.js";
 import type { BatchLookupPart, BatchLookupResponse, Offer } from "../types.js";
 import { errorResult, jsonResult, type ClientProvider } from "./common.js";
@@ -29,6 +37,9 @@ export const MAX_LOOKUP_PARTS = 2000;
 export const MAX_QUANTITY = 1_000_000_000;
 /** Quantity used for pricing when none was requested. */
 export const DEFAULT_QUANTITY = 1;
+/** Error text for parts in batches skipped after an unrecovered rate limit. */
+export const NOT_ATTEMPTED_MESSAGE =
+  "Not attempted: the Future API rate limit was reached. Retry these parts later.";
 
 const partNumberSchema = z
   .string()
@@ -70,16 +81,19 @@ export const LOOKUP_PARTS_DESCRIPTION =
   "Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). " +
   `Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. ` +
   "Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are " +
-  `summed), then sent in batches of ${MAX_BATCH_PARTS}. ` +
-  'Returns one entry per unique part with status "found", "not_found" or "error". For found ' +
+  `summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. ` +
+  'Returns one entry per unique part, in input order, with status "found", "not_found", ' +
+  '"error" or "not_attempted". For found ' +
   "parts it reports the best offer (the one with the most stock): quantity_available, lead_time, " +
   "and price, the price break that applies at the requested quantity (quantity 1 when none is " +
   'given; price_break is null with a reason such as "below_minimum" when it does not apply). ' +
-  "If one batch fails, its parts get the error and the rest are still returned. Totals summarize " +
-  "the run. Prices are not an official quote. Use the single-part lookup tool for full offer " +
-  "details of one part.";
+  "If one batch fails, its parts get the error and the rest are still returned. If the API rate " +
+  "limit is still hit after retries, the lookup stops early: batches already running finish, and " +
+  'parts in batches not yet started are marked "not_attempted" (retry them later; ' +
+  "totals.rate_limited is true). Totals summarize the run. Prices are not an official quote. " +
+  "Use the single-part lookup tool for full offer details of one part.";
 
-export type PartStatus = "found" | "not_found" | "error";
+export type PartStatus = "found" | "not_found" | "error" | "not_attempted";
 
 export interface PartResult {
   part_number: string;
@@ -101,7 +115,10 @@ export interface LookupTotals {
   found: number;
   not_found: number;
   errors: number;
+  not_attempted: number;
   batches: number;
+  /** True when an unrecovered HTTP 429 stopped the lookup early. */
+  rate_limited: boolean;
 }
 
 interface UniquePart {
@@ -197,7 +214,28 @@ function partResult(part: UniquePart, entry: BatchLookupPart | undefined): PartR
 
 type RawBatch =
   | { part_numbers: string[]; response: BatchLookupResponse }
-  | { part_numbers: string[]; error: string };
+  | { part_numbers: string[]; error: string }
+  | { part_numbers: string[]; not_attempted: true; error: string };
+
+/** Worker-pool size: the client's maxConcurrency, or 1 when missing or invalid. */
+export function poolSize(client: { maxConcurrency?: unknown } | undefined): number {
+  const n = client?.maxConcurrency;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+/** True for a rate limit that survived the client's retries. */
+function isRateLimit(error: unknown): boolean {
+  return error instanceof FutureApiError && error.status === 429;
+}
+
+function errorPart(part: UniquePart, message: string, status: PartStatus = "error"): PartResult {
+  return {
+    part_number: part.part_number,
+    quantity: part.quantity ?? DEFAULT_QUANTITY,
+    status,
+    error: message,
+  };
+}
 
 /** Run the lookup. Exported for tests; the MCP handler wraps it. */
 export async function lookupParts(
@@ -212,12 +250,7 @@ export async function lookupParts(
       validatePartNumber(part.part_number);
       sendable.push(part);
     } catch (error) {
-      results.set(part.part_number, {
-        part_number: part.part_number,
-        quantity: part.quantity ?? DEFAULT_QUANTITY,
-        status: "error",
-        error: failureMessage(error),
-      });
+      results.set(part.part_number, errorPart(part, failureMessage(error)));
     }
   }
 
@@ -231,31 +264,45 @@ export async function lookupParts(
   }
 
   const chunks = chunk(sendable, MAX_BATCH_PARTS);
-  const rawBatches: RawBatch[] = [];
+  // Index-addressed so output order is input order, not completion order.
+  const rawBatches: RawBatch[] = new Array(chunks.length);
+  let next = 0;
   let succeeded = 0;
-  for (const group of chunks) {
+  let rateLimited = false;
+
+  const runBatch = async (index: number): Promise<void> => {
+    const group = chunks[index]!;
     const names = group.map((p) => p.part_number);
     try {
-      // Sequential on purpose: parallel batches invite HTTP 429.
       const resp = await client!.batchLookup(names);
       succeeded++;
-      rawBatches.push({ part_numbers: names, response: resp });
+      rawBatches[index] = { part_numbers: names, response: resp };
       group.forEach((p, i) => {
         results.set(p.part_number, partResult(p, matchResponse(resp, p.part_number, i)));
       });
     } catch (error) {
+      // Retries are exhausted by now; stop dispatching new batches.
+      if (isRateLimit(error)) rateLimited = true;
       const message = failureMessage(error);
-      rawBatches.push({ part_numbers: names, error: message });
-      for (const p of group) {
-        results.set(p.part_number, {
-          part_number: p.part_number,
-          quantity: p.quantity ?? DEFAULT_QUANTITY,
-          status: "error",
-          error: message,
-        });
-      }
+      rawBatches[index] = { part_numbers: names, error: message };
+      for (const p of group) results.set(p.part_number, errorPart(p, message));
     }
-  }
+  };
+
+  const worker = async (): Promise<void> => {
+    while (!rateLimited && next < chunks.length) await runBatch(next++);
+  };
+  const workers = Math.min(poolSize(client), chunks.length);
+  await Promise.all(Array.from({ length: workers }, worker));
+
+  chunks.forEach((group, index) => {
+    if (rawBatches[index] !== undefined) return;
+    const names = group.map((p) => p.part_number);
+    rawBatches[index] = { part_numbers: names, not_attempted: true, error: NOT_ATTEMPTED_MESSAGE };
+    for (const p of group) {
+      results.set(p.part_number, errorPart(p, NOT_ATTEMPTED_MESSAGE, "not_attempted"));
+    }
+  });
 
   const parts = unique.map((p) => results.get(p.part_number)!);
   const count = (s: PartStatus) => parts.filter((p) => p.status === s).length;
@@ -265,7 +312,9 @@ export async function lookupParts(
     found: count("found"),
     not_found: count("not_found"),
     errors: count("error"),
+    not_attempted: count("not_attempted"),
     batches: chunks.length,
+    rate_limited: rateLimited,
   };
 
   const sent = new Set(sendable.map((s) => s.part_number));
@@ -282,7 +331,7 @@ export async function lookupParts(
     : { note: PRICING_DISCLAIMER, totals, parts };
 
   const result = jsonResult(body);
-  // Nothing succeeded: every batch failed, or every part was invalid.
+  // Nothing succeeded: every batch failed or was skipped, or every part was invalid.
   if (succeeded === 0) result.isError = true;
   return result;
 }
