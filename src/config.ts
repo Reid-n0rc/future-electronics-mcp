@@ -4,6 +4,10 @@
 // raised here never include the key or the configured base URL, so a
 // misconfiguration cannot leak a secret into logs.
 
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+
 /** Default origin of the Future Electronics API. */
 export const DEFAULT_BASE_URL = "https://api.futureelectronics.com";
 
@@ -108,4 +112,46 @@ export function parseIntSetting(
     throw new ConfigError(`${name} must be an integer from ${min} to ${max}.`);
   }
   return parsed;
+}
+
+/** Folder name of the default workspace (issue #40). */
+export const WORKSPACE_FOLDER_NAME = "Future Electronics MCP";
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The default workspace folder: `~/Documents/Future Electronics MCP`, or
+ * `~/Future Electronics MCP` when there is no Documents folder. It only
+ * computes the path; nothing is created here.
+ */
+export function defaultWorkspaceDir(home: string = homedir()): string {
+  const documents = join(home, "Documents");
+  return join(isDirectory(documents) ? documents : home, WORKSPACE_FOLDER_NAME);
+}
+
+/**
+ * Reads `FUTURE_WORKSPACE_DIR` (optional, must be an absolute path) and
+ * returns the workspace folder, or {@link defaultWorkspaceDir} when unset.
+ * An empty value, or an installer placeholder left unsubstituted such as
+ * `${user_config.workspace_dir}`, counts as unset. Errors never echo the value.
+ */
+export function loadWorkspaceDir(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  const raw = env.FUTURE_WORKSPACE_DIR?.trim();
+  if (!raw || /^\$\{[^}]*\}$/.test(raw)) return defaultWorkspaceDir(home);
+  if (raw.includes("\0")) {
+    throw new ConfigError("FUTURE_WORKSPACE_DIR must not contain a NUL byte.");
+  }
+  if (!isAbsolute(raw)) {
+    throw new ConfigError("FUTURE_WORKSPACE_DIR must be an absolute path.");
+  }
+  return resolve(raw);
 }

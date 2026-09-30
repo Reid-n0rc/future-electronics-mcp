@@ -116,6 +116,7 @@ That writes `build/future-electronics-mcp.mcpb`.
 | `FUTURE_API_BASE_URL` | No               | Override the API origin (default `https://api.futureelectronics.com`). Must be `https`. |
 | `FUTURE_MAX_CONCURRENCY` | No            | Most requests in flight to the Future API at once, across all tool calls. Integer 1–32, default `4`. |
 | `FUTURE_MIN_REQUEST_INTERVAL_MS` | No    | Minimum gap between request starts, in ms. Integer 0–60000, default `0` (no pacing). |
+| `FUTURE_WORKSPACE_DIR` | No              | Absolute path of the [workspace folder](#workspace-folder) for BOM files and exports. |
 
 The server **starts without a key**. The key is read the first time a tool is
 called, and a missing key fails only that call, with a clear error. With the
@@ -130,6 +131,23 @@ default. After a 429, it pauses every new request, server-wide, for the
 `Retry-After` period (seconds or an HTTP date) or the backoff delay. Requests
 already in flight finish normally. Invalid values for either setting fail the
 first tool call with a clear error.
+
+### Workspace folder
+
+The server reads BOM files from, and writes exports to, **one workspace
+folder**. That lets file-based BOM workflows run in Claude Desktop without a
+separate filesystem connector.
+
+- **Default:** `~/Documents/Future Electronics MCP`, or
+  `~/Future Electronics MCP` if you have no Documents folder.
+- **Change it:** in Claude Desktop, open **Settings → Extensions → Future
+  Electronics Part Lookup** and pick a folder. With the Claude Code plugin,
+  set the optional **Workspace folder** option (leave it blank for the
+  default). Anywhere else, set `FUTURE_WORKSPACE_DIR` to an absolute path.
+- The folder is created, readable only by you (mode `0700`), the first time
+  something is saved there. The server never creates it at startup.
+- **The server only reads and writes inside this folder.** It rejects `..`
+  paths, absolute paths elsewhere, and symlinks that lead outside it.
 
 ## MCP tools
 

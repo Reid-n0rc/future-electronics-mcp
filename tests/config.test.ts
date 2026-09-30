@@ -1,12 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ConfigError,
   DEFAULT_BASE_URL,
   MAX_CONCURRENCY_DEFAULT,
   MIN_REQUEST_INTERVAL_DEFAULT_MS,
+  defaultWorkspaceDir,
   loadConfig,
+  loadWorkspaceDir,
   parseIntSetting,
   validateBaseUrl,
+  WORKSPACE_FOLDER_NAME,
 } from "../src/config.js";
 
 describe("loadConfig", () => {
@@ -164,5 +170,91 @@ describe("parseIntSetting", () => {
     expect(parseIntSetting("5", "X", 7, 2, 5)).toBe(5);
     expect(() => parseIntSetting("1", "X", 7, 2, 5)).toThrow("X must be an integer from 2 to 5.");
     expect(() => parseIntSetting("6", "X", 7, 2, 5)).toThrow(ConfigError);
+  });
+});
+
+describe("defaultWorkspaceDir", () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "fe-home-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("uses ~/Documents/Future Electronics MCP when Documents exists", () => {
+    mkdirSync(join(home, "Documents"));
+    expect(defaultWorkspaceDir(home)).toBe(join(home, "Documents", WORKSPACE_FOLDER_NAME));
+  });
+
+  it("falls back to ~/Future Electronics MCP without a Documents folder", () => {
+    expect(defaultWorkspaceDir(home)).toBe(join(home, WORKSPACE_FOLDER_NAME));
+  });
+
+  it("ignores a Documents entry that is a file, not a folder", () => {
+    writeFileSync(join(home, "Documents"), "x");
+    expect(defaultWorkspaceDir(home)).toBe(join(home, WORKSPACE_FOLDER_NAME));
+  });
+
+  it("creates nothing", () => {
+    mkdirSync(join(home, "Documents"));
+    defaultWorkspaceDir(home);
+    loadWorkspaceDir({}, home);
+    expect(existsSync(join(home, "Documents", WORKSPACE_FOLDER_NAME))).toBe(false);
+    expect(existsSync(join(home, WORKSPACE_FOLDER_NAME))).toBe(false);
+  });
+
+  it("defaults to the user's home directory", () => {
+    expect(defaultWorkspaceDir().endsWith(WORKSPACE_FOLDER_NAME)).toBe(true);
+    expect(defaultWorkspaceDir().startsWith(homedir())).toBe(true);
+  });
+});
+
+describe("loadWorkspaceDir", () => {
+  const home = join(tmpdir(), "fe-no-such-home");
+  const absolute = resolve(tmpdir(), "my-boms");
+
+  it.each([
+    {},
+    { FUTURE_WORKSPACE_DIR: "" },
+    { FUTURE_WORKSPACE_DIR: "   " },
+    { FUTURE_WORKSPACE_DIR: "${user_config.workspace_dir}" },
+    { FUTURE_WORKSPACE_DIR: " ${WORKSPACE} " },
+  ])("uses the default when unset, empty, or an unsubstituted placeholder (%j)", (env) => {
+    expect(loadWorkspaceDir(env, home)).toBe(join(home, WORKSPACE_FOLDER_NAME));
+  });
+
+  it("uses an absolute FUTURE_WORKSPACE_DIR, trimmed and normalized", () => {
+    const value = ` ${absolute}${sep}x${sep}..${sep} `;
+    expect(loadWorkspaceDir({ FUTURE_WORKSPACE_DIR: value }, home)).toBe(absolute);
+  });
+
+  it.each(["relative/boms", "./boms", "~/boms", "boms"])(
+    "rejects a relative path (%j) without echoing it",
+    (value) => {
+      try {
+        loadWorkspaceDir({ FUTURE_WORKSPACE_DIR: value }, home);
+        expect.unreachable();
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        expect((error as Error).message).toMatch(/must be an absolute path/);
+        expect((error as Error).message).not.toContain(value);
+      }
+    },
+  );
+
+  it("rejects a NUL byte", () => {
+    expect(() => loadWorkspaceDir({ FUTURE_WORKSPACE_DIR: `${absolute}\0x` }, home)).toThrow(/NUL/);
+  });
+
+  it("defaults to process.env", () => {
+    const saved = process.env.FUTURE_WORKSPACE_DIR;
+    process.env.FUTURE_WORKSPACE_DIR = absolute;
+    try {
+      expect(loadWorkspaceDir()).toBe(absolute);
+    } finally {
+      if (saved === undefined) delete process.env.FUTURE_WORKSPACE_DIR;
+      else process.env.FUTURE_WORKSPACE_DIR = saved;
+    }
   });
 });

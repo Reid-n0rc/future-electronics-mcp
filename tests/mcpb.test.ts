@@ -28,7 +28,14 @@ interface Manifest {
   compatibility?: { runtimes?: Record<string, string> };
   user_config?: Record<
     string,
-    { type: string; title: string; description: string; sensitive?: boolean; required?: boolean }
+    {
+      type: string;
+      title: string;
+      description: string;
+      sensitive?: boolean;
+      required?: boolean;
+      default?: string;
+    }
   >;
 }
 
@@ -80,14 +87,29 @@ describe("mcpb/manifest.json: server", () => {
     expect(manifest.server.mcp_config.args).toEqual([`\${__dirname}/${manifest.server.entry_point}`]);
   });
 
-  it("passes only the user-configured key through the environment", () => {
-    expect(Object.entries(manifest.server.mcp_config.env ?? {})).toEqual([["FUTURE_API_KEY", KEY_REFERENCE]]);
+  it("passes only the user-configured key and workspace folder through the environment", () => {
+    expect(Object.entries(manifest.server.mcp_config.env ?? {})).toEqual([
+      ["FUTURE_API_KEY", KEY_REFERENCE],
+      ["FUTURE_WORKSPACE_DIR", "${user_config.workspace_dir}"],
+    ]);
   });
 });
 
 describe("mcpb/manifest.json: user_config", () => {
+  it("asks for an optional workspace directory, defaulting under Documents", () => {
+    const dir = manifest.user_config!.workspace_dir;
+    expect(dir.type).toBe("directory");
+    expect(dir.required).toBe(false);
+    expect(dir.sensitive).toBeUndefined();
+    expect(dir.title.length).toBeGreaterThan(0);
+    expect(dir.description.length).toBeGreaterThan(0);
+    // ${DOCUMENTS} is a documented MCPB default-value variable.
+    expect(dir.default).toBe("${DOCUMENTS}/Future Electronics MCP");
+    expect(dir).not.toHaveProperty("multiple");
+  });
+
   it("asks for the key as a required, sensitive string", () => {
-    expect(Object.keys(manifest.user_config ?? {})).toEqual(["future_api_key"]);
+    expect(Object.keys(manifest.user_config ?? {})).toEqual(["future_api_key", "workspace_dir"]);
     const key = manifest.user_config!.future_api_key;
     expect(key.type).toBe("string");
     expect(key.sensitive).toBe(true);
