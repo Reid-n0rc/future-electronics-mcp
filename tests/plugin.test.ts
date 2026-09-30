@@ -117,8 +117,24 @@ describe(".claude-plugin/plugin.json", () => {
 
   it("passes the key from the install prompt, exactly ${user_config.future_api_key}", () => {
     const env = plugin.mcpServers["future-electronics"]?.env;
-    expect(Object.keys(env ?? {})).toEqual(["FUTURE_API_KEY"]);
+    expect(Object.keys(env ?? {})).toEqual(["FUTURE_API_KEY", "FUTURE_WORKSPACE_DIR"]);
     expect(env?.FUTURE_API_KEY).toBe(PLUGIN_KEY_REFERENCE);
+  });
+
+  it("passes the optional workspace folder as FUTURE_WORKSPACE_DIR", () => {
+    const env = plugin.mcpServers["future-electronics"]?.env;
+    expect(env?.FUTURE_WORKSPACE_DIR).toBe("${user_config.workspace_dir}");
+  });
+
+  it("asks for the workspace folder as an optional directory with no default", () => {
+    const option = plugin.userConfig?.workspace_dir;
+    expect(option?.type).toBe("directory");
+    expect(option?.required).toBe(false);
+    expect(option?.sensitive).toBeUndefined();
+    expect(option?.title.length).toBeGreaterThan(0);
+    expect(option?.description).toMatch(/workspace|folder/i);
+    // Left blank, the server picks its own default (see src/config.ts).
+    expect(option).not.toHaveProperty("default");
   });
 
   it("asks for the key at install as a required, sensitive string", () => {

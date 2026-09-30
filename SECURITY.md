@@ -34,6 +34,17 @@ documentation example.
 3. Record the incident in a private security advisory, or in an issue if
    nothing sensitive remains. Never include the key itself.
 
+## File access boundary
+
+The server reads and writes files only inside the one workspace folder
+(`FUTURE_WORKSPACE_DIR`, see README.md). Every file name goes through
+`resolveInWorkspace` in `src/workspace.ts`, which rejects `..` traversal,
+absolute paths outside the folder, NUL bytes, broken symlinks, and symlinks
+that resolve outside it (checked with `realpath`). Error messages never include
+the workspace path. The folder is created with mode `0700` on first write. A
+way to read or write outside the workspace is a vulnerability; report it as
+below.
+
 ## Reporting a vulnerability
 
 This repository uses **GitHub private vulnerability reporting**. To report a

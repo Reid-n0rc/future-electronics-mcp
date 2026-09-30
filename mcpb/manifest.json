@@ -24,7 +24,8 @@
       "command": "node",
       "args": ["${__dirname}/server/future-electronics-mcp.mjs"],
       "env": {
-        "FUTURE_API_KEY": "${user_config.future_api_key}"
+        "FUTURE_API_KEY": "${user_config.future_api_key}",
+        "FUTURE_WORKSPACE_DIR": "${user_config.workspace_dir}"
       }
     }
   },
@@ -50,6 +51,13 @@
       "description": "Your Future Electronics license key, from https://www.futureelectronics.com/api-solutions. Claude Desktop stores it securely.",
       "sensitive": true,
       "required": true
+    },
+    "workspace_dir": {
+      "type": "directory",
+      "title": "Workspace folder",
+      "description": "The one folder where the server reads BOM files and writes exports. It never reads or writes files outside it. The folder is created the first time something is saved there.",
+      "required": false,
+      "default": "${DOCUMENTS}/Future Electronics MCP"
     }
   }
 }
