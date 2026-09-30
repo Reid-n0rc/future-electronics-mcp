@@ -1,0 +1,39 @@
+# Enforces the AGENTS.md issue policy: every PR into dev must close an issue
+# that has the `plan-approved` label and is assigned to whoever did the work.
+# Release PRs (dev -> master) are exempt. Logic: scripts/check-issue-policy.mjs.
+#
+# Uses pull_request_target so the workflow and script always come from the base
+# branch: a PR cannot weaken the check by editing it. This is safe because no
+# PR code is checked out or executed; the PR body is only read from the event
+# payload file and matched with a regex. The token is read-only.
+#
+# Assigning or approving an issue does not re-trigger this check on its own;
+# edit the PR or push a commit, or re-run the job, after fixing the issue.
+name: Issue policy
+
+on:
+  pull_request_target:
+    branches: [dev, master]
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  issue-policy:
+    name: Linked issue approved and assigned
+    runs-on: ubuntu-latest
+    steps:
+      # Base branch only (the pull_request_target default). Never check out the PR head here.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - name: Check linked issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-issue-policy.mjs

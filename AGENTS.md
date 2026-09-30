@@ -22,7 +22,8 @@ Product Information API. For the API summary and planned tools, see README.md.
 2. **No work without an approved issue.** Every change must be tracked by a
    GitHub issue that contains a software plan. Do not start implementation
    until the maintainer (@Reid-n0rc) has approved the plan. Approval means the issue has the `plan-approved` label. Issues
-   labeled `plan-needs-approval` are **not** ready to work.
+   labeled `plan-needs-approval` are **not** ready to work. Before work starts,
+   the issue must also be **assigned to whoever is working it**.
 3. **One branch per issue, based on `dev`.**
    ```bash
    git fetch origin
@@ -80,10 +81,16 @@ templates are intake only, and filing one does not authorize work.
    `plan-needs-approval` label.
 2. The maintainer reviews the plan. They approve it by swapping the label to
    `plan-approved`, or they request changes in the comments.
-3. Work happens on `issue-<n>-<slug>`, branched from `dev`.
-4. Open a PR into `dev` whose body contains `Closes #<n>`. CI and tests must
+3. Before creating the branch, assign the issue to the person working it:
+   `gh issue edit <n> --add-assignee <login>` (or `@me`). Agents work under the
+   maintainer's GitHub account, so agent work is assigned to that account.
+   **Enforced:** the `Issue policy` check fails any PR into `dev` whose
+   `Closes #<n>` issue lacks `plan-approved` or an assignee
+   (`.github/workflows/issue-policy.yml`).
+4. Work happens on `issue-<n>-<slug>`, branched from `dev`.
+5. Open a PR into `dev` whose body contains `Closes #<n>`. CI and tests must
    pass.
-5. The maintainer merges the PR.
+6. The maintainer merges the PR.
 
 ## Task sizing (context-window budget)
 
