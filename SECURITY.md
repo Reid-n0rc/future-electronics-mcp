@@ -20,6 +20,11 @@ documentation example.
   `.env.example`, and it contains placeholder values only.
 - Tests must use mocked HTTP responses and dummy keys such as `test-key`. Live
   API tests are opt-in, and they read the key from the environment.
+- For CI, the key is stored only as the `FUTURE_API_KEY` secret of the
+  `live-api` GitHub Environment, never as a repository secret. Each run that
+  uses it needs the maintainer's approval. Only the `live-check` step reads it,
+  and only on release PRs from this repo, published releases, and manual runs.
+  Fork PRs and PRs into `dev` never receive it.
 - The server must never log, echo, or return the key in tool output, error
   messages, or stack traces. Error handling must redact it.
 - Do not paste real keys into issues, pull requests, or agent prompts.

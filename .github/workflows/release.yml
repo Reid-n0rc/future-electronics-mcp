@@ -2,9 +2,14 @@
 # release (issue #34).
 #
 # Runs only when the maintainer publishes a release. It builds the .mcpb from
-# the tagged commit and uploads it as a release asset. The only credential is
-# the built-in GITHUB_TOKEN, with contents: write on this one job. No
-# repository secrets are used, and no key goes into the bundle.
+# the tagged commit and uploads it as a release asset. The upload credential is
+# the built-in GITHUB_TOKEN, with contents: write on that one job. No key goes
+# into the bundle.
+#
+# The bundle is attached only after `live-check` passes (issue #61): one real
+# lookup against the Future API from the tagged commit, using FUTURE_API_KEY
+# from the `live-api` environment secret (maintainer approval required). Only
+# that step sees the key.
 name: Release
 
 on:
@@ -19,8 +24,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  live-check:
+    name: live-check
+    runs-on: ubuntu-latest
+    environment: live-api
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - name: Live API check
+        env:
+          FUTURE_API_KEY: ${{ secrets.FUTURE_API_KEY }}
+        run: npm run live-check
+
   mcpb:
     name: Attach .mcpb to the release
+    needs: live-check
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release upload
