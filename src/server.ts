@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { lazyClientProvider, type ClientProvider } from "./tools/common.js";
 import { registerLookupPartTool } from "./tools/lookupPart.js";
 import { registerLookupPartsTool } from "./tools/lookupParts.js";
+import { registerListBomFilesTool } from "./tools/listBomFiles.js";
 import { registerQueryResultsTool } from "./tools/queryResults.js";
 
 export const SERVER_NAME = "future-electronics-mcp";
@@ -14,6 +15,7 @@ export const SERVER_VERSION = "0.1.0";
 export function registerTools(server: McpServer, getClient: ClientProvider = lazyClientProvider()): void {
   registerLookupPartTool(server, getClient);
   registerLookupPartsTool(server, getClient);
+  registerListBomFilesTool(server);
   registerQueryResultsTool(server);
 }
 

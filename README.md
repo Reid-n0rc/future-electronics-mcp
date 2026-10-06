@@ -152,7 +152,8 @@ separate filesystem connector.
 
 ## MCP tools
 
-All tools are read-only. Every summary carries a `note` saying that pricing is
+All tools are read-only. `future_list_bom_files` is described under
+[BOM files](#bom-files). Every summary carries a `note` saying that pricing is
 not an official quote.
 
 ### Output budget
@@ -233,7 +234,8 @@ match).
 
 | Input   | Type    | Default  | Limits and notes                                                                                   |
 |---------|---------|----------|----------------------------------------------------------------------------------------------------|
-| `parts` | array   | required | 1 to 2000 items. Each is a string (`"LM317T"`) or `{"part_number": "LM317T", "quantity": 500}`. Part numbers must not be blank; `quantity` is an optional positive integer up to 1,000,000,000. |
+| `parts` | array   | one of `parts`/`bom_file` | 1 to 2000 items. Each is a string (`"LM317T"`) or `{"part_number": "LM317T", "quantity": 500}`. Part numbers must not be blank; `quantity` is an optional positive integer up to 1,000,000,000. |
+| `bom_file` | object | one of `parts`/`bom_file` | Read the parts from a CSV/TSV file in the [workspace folder](#workspace-folder) instead. See [BOM files](#bom-files). |
 | `detail` | enum   | `summary` | `summary`: totals plus an `issues` table of problem parts only. `all`: a `parts` table row for every part. |
 | `raw`   | boolean | `false`  | Return the untouched upstream batch responses instead of the summary. Far larger, so the budget usually drops whole batches. |
 
@@ -325,6 +327,55 @@ Example, from the synthetic batch fixture (`parts: ["TEST-0000",
   }
 }
 ```
+
+### BOM files
+
+Instead of listing thousands of part numbers in the tool call, save the BOM
+as a `.csv` or `.tsv` file in the [workspace folder](#workspace-folder) and
+name it:
+
+- **Claude Desktop:** save `bom.csv` in the workspace folder (by default
+  `Documents/Future Electronics MCP`), then ask "look up bom.csv". No
+  filesystem connector is needed.
+- **Claude Code:** copy the file into the workspace folder the same way, then
+  ask "look up bom.csv".
+
+The model can call `future_list_bom_files` to see the files there. It takes no
+input and returns a `files` table with `name`, `size_bytes` and `modified`
+(ISO 8601).
+
+`bom_file` fields:
+
+| Field             | Default     | Notes                                                                        |
+|-------------------|-------------|------------------------------------------------------------------------------|
+| `path`            | required    | File name in the workspace folder (a subfolder path is fine). `.csv` or `.tsv`, any case. |
+| `part_column`     | auto-detect | Header name (case-insensitive) or 1-based column number.                    |
+| `quantity_column` | auto-detect | Header name or 1-based column number.                                       |
+| `has_header`      | `true`      | Without a header, the part number is column 1 and there is no quantity unless `quantity_column` is given. |
+| `delimiter`       | auto-detect | `,`, `;` or tab. Detected as the most frequent of the three in the first line. |
+
+Column detection compares headers ignoring case and extra spaces:
+
+- Part number: `mpn`, `manufacturer part number`, `part number`,
+  `part_number`, `mfr part`, `pn`
+- Quantity: `qty`, `quantity`, `quantity per`, `count`
+
+If no part column matches, or more than one header matches either list, the
+call fails with a message listing the headers it found; name the column with
+`part_column` or `quantity_column`. With no quantity column, parts are priced
+at quantity 1.
+
+Reading rules: files must be UTF-8 (a byte-order mark is fine) and at most
+5 MB. Quoted fields, `""` escapes, delimiters and line breaks inside quotes,
+and CRLF line ends are all handled (RFC 4180). Blank rows are ignored. Rows
+with an empty part number are skipped and counted. A quantity must be empty or
+a whole number from 1 to 1,000,000,000 (`100.00` is fine); any other value
+fails the call, naming the rows. The 2000-part limit applies after
+duplicates are merged. Errors name the file only as you gave it, never the
+workspace path.
+
+The result also carries `source: {file, rows_read, rows_skipped,
+part_column, quantity_column}` so you can check how the file was read.
 
 ### `future_query_results`
 

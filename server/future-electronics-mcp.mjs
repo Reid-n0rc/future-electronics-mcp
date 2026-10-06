@@ -68,9 +68,9 @@ var require_code = __commonJS({
     };
     exports.Name = Name;
     var _Code = class extends _CodeOrName {
-      constructor(code) {
+      constructor(code2) {
         super();
-        this._items = typeof code === "string" ? [code] : code;
+        this._items = typeof code2 === "string" ? [code2] : code2;
       }
       toString() {
         return this.str;
@@ -97,13 +97,13 @@ var require_code = __commonJS({
     exports._Code = _Code;
     exports.nil = new _Code("");
     function _(strs, ...args) {
-      const code = [strs[0]];
+      const code2 = [strs[0]];
       let i = 0;
       while (i < args.length) {
-        addCodeArg(code, args[i]);
-        code.push(strs[++i]);
+        addCodeArg(code2, args[i]);
+        code2.push(strs[++i]);
       }
-      return new _Code(code);
+      return new _Code(code2);
     }
     exports._ = _;
     var plus = new _Code("+");
@@ -119,13 +119,13 @@ var require_code = __commonJS({
       return new _Code(expr);
     }
     exports.str = str2;
-    function addCodeArg(code, arg) {
+    function addCodeArg(code2, arg) {
       if (arg instanceof _Code)
-        code.push(...arg._items);
+        code2.push(...arg._items);
       else if (arg instanceof Name)
-        code.push(arg);
+        code2.push(arg);
       else
-        code.push(interpolate(arg));
+        code2.push(interpolate(arg));
     }
     exports.addCodeArg = addCodeArg;
     function optimize(expr) {
@@ -309,7 +309,7 @@ var require_scope = __commonJS({
         }, usedValues, getCode);
       }
       _reduceValues(values, valueCode, usedValues = {}, getCode) {
-        let code = code_1.nil;
+        let code2 = code_1.nil;
         for (const prefix in values) {
           const vs = values[prefix];
           if (!vs)
@@ -322,16 +322,16 @@ var require_scope = __commonJS({
             let c = valueCode(name);
             if (c) {
               const def = this.opts.es5 ? exports.varKinds.var : exports.varKinds.const;
-              code = (0, code_1._)`${code}${def} ${name} = ${c};${this.opts._n}`;
+              code2 = (0, code_1._)`${code2}${def} ${name} = ${c};${this.opts._n}`;
             } else if (c = getCode === null || getCode === void 0 ? void 0 : getCode(name)) {
-              code = (0, code_1._)`${code}${c}${this.opts._n}`;
+              code2 = (0, code_1._)`${code2}${c}${this.opts._n}`;
             } else {
               throw new ValueError(name);
             }
             nameSet.set(name, UsedValueState.Completed);
           });
         }
-        return code;
+        return code2;
       }
     };
     exports.ValueScope = ValueScope;
@@ -416,11 +416,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -437,10 +437,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -491,9 +491,9 @@ var require_codegen = __commonJS({
       }
     };
     var AnyCode = class extends Node {
-      constructor(code) {
+      constructor(code2) {
         super();
-        this.code = code;
+        this.code = code2;
       }
       render({ _n }) {
         return `${this.code};` + _n;
@@ -501,8 +501,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -515,7 +515,7 @@ var require_codegen = __commonJS({
         this.nodes = nodes;
       }
       render(opts) {
-        return this.nodes.reduce((code, n) => code + n.render(opts), "");
+        return this.nodes.reduce((code2, n) => code2 + n.render(opts), "");
       }
       optimizeNodes() {
         const { nodes } = this;
@@ -531,12 +531,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          if (n.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -563,10 +563,10 @@ var require_codegen = __commonJS({
         this.condition = condition;
       }
       render(opts) {
-        let code = `if(${this.condition})` + super.render(opts);
+        let code2 = `if(${this.condition})` + super.render(opts);
         if (this.else)
-          code += "else " + this.else.render(opts);
-        return code;
+          code2 += "else " + this.else.render(opts);
+        return code2;
       }
       optimizeNodes() {
         super.optimizeNodes();
@@ -589,12 +589,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -617,10 +617,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -656,10 +656,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -687,12 +687,12 @@ var require_codegen = __commonJS({
     Return.kind = "return";
     var Try = class extends BlockNode {
       render(opts) {
-        let code = "try" + super.render(opts);
+        let code2 = "try" + super.render(opts);
         if (this.catch)
-          code += this.catch.render(opts);
+          code2 += this.catch.render(opts);
         if (this.finally)
-          code += this.finally.render(opts);
-        return code;
+          code2 += this.finally.render(opts);
+        return code2;
       }
       optimizeNodes() {
         var _a, _b;
@@ -701,11 +701,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a, _b;
-        super.optimizeNames(names, constants);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -809,18 +809,18 @@ var require_codegen = __commonJS({
       }
       // returns code for object literal for the passed argument list of key-value pairs
       object(...keyValues) {
-        const code = ["{"];
+        const code2 = ["{"];
         for (const [key, value] of keyValues) {
-          if (code.length > 1)
-            code.push(",");
-          code.push(key);
+          if (code2.length > 1)
+            code2.push(",");
+          code2.push(key);
           if (key !== value || this.opts.es5) {
-            code.push(":");
-            (0, code_1.addCodeArg)(code, value);
+            code2.push(":");
+            (0, code_1.addCodeArg)(code2, value);
           }
         }
-        code.push("}");
-        return new code_1._Code(code);
+        code2.push("}");
+        return new code_1._Code(code2);
       }
       // `if` clause (or statement if `thenBody` and, optionally, `elseBody` are passed)
       if(condition, thenBody, elseBody) {
@@ -1006,7 +1006,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1021,14 +1021,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants[n.str];
+        const c = constants2[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -2990,7 +2990,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3017,7 +3017,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3139,22 +3139,22 @@ var require_utils = __commonJS({
     }
     function stringArrayToHexStripped(input) {
       let acc = "";
-      let code = 0;
+      let code2 = 0;
       let i = 0;
       for (i = 0; i < input.length; i++) {
-        code = input[i].charCodeAt(0);
-        if (code === 48) {
+        code2 = input[i].charCodeAt(0);
+        if (code2 === 48) {
           continue;
         }
-        if (!(code >= 48 && code <= 57 || code >= 65 && code <= 70 || code >= 97 && code <= 102)) {
+        if (!(code2 >= 48 && code2 <= 57 || code2 >= 65 && code2 <= 70 || code2 >= 97 && code2 <= 102)) {
           return "";
         }
         acc += input[i];
         break;
       }
       for (i += 1; i < input.length; i++) {
-        code = input[i].charCodeAt(0);
-        if (!(code >= 48 && code <= 57 || code >= 65 && code <= 70 || code >= 97 && code <= 102)) {
+        code2 = input[i].charCodeAt(0);
+        if (!(code2 >= 48 && code2 <= 57 || code2 >= 65 && code2 <= 70 || code2 >= 97 && code2 <= 102)) {
           return "";
         }
         acc += input[i];
@@ -3396,15 +3396,15 @@ var require_utils = __commonJS({
         if (isPathCharacter(ch)) {
           output += ch;
         } else {
-          const code = input.charCodeAt(i);
-          if (code < 128) {
-            output += isEscapeSafe(code) ? ch : BYTE_HEX[code];
-          } else if (code < 55296 || code > 57343) {
-            output += percentEncodeNonAscii(code);
-          } else if (code <= 56319 && i + 1 < input.length) {
+          const code2 = input.charCodeAt(i);
+          if (code2 < 128) {
+            output += isEscapeSafe(code2) ? ch : BYTE_HEX[code2];
+          } else if (code2 < 55296 || code2 > 57343) {
+            output += percentEncodeNonAscii(code2);
+          } else if (code2 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3435,15 +3435,15 @@ var require_utils = __commonJS({
         if (isPathCharacter(ch) && (ch !== ":" || !firstSegment)) {
           output += ch;
         } else {
-          const code = input.charCodeAt(i);
-          if (code < 128) {
-            output += BYTE_HEX[code];
-          } else if (code < 55296 || code > 57343) {
-            output += percentEncodeNonAscii(code);
-          } else if (code <= 56319 && i + 1 < input.length) {
+          const code2 = input.charCodeAt(i);
+          if (code2 < 128) {
+            output += BYTE_HEX[code2];
+          } else if (code2 < 55296 || code2 > 57343) {
+            output += percentEncodeNonAscii(code2);
+          } else if (code2 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3470,15 +3470,15 @@ var require_utils = __commonJS({
         if (isAllowed(ch)) {
           output += ch;
         } else {
-          const code = input.charCodeAt(i);
-          if (code < 128) {
-            output += BYTE_HEX[code];
-          } else if (code < 55296 || code > 57343) {
-            output += percentEncodeNonAscii(code);
-          } else if (code <= 56319 && i + 1 < input.length) {
+          const code2 = input.charCodeAt(i);
+          if (code2 < 128) {
+            output += BYTE_HEX[code2];
+          } else if (code2 < 55296 || code2 > 57343) {
+            output += percentEncodeNonAscii(code2);
+          } else if (code2 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3523,15 +3523,15 @@ var require_utils = __commonJS({
         if (isQueryFragmentCharacter(ch)) {
           output += ch;
         } else {
-          const code = input.charCodeAt(i);
-          if (code < 128) {
-            output += isEscapeSafe(code) ? ch : BYTE_HEX[code];
-          } else if (code < 55296 || code > 57343) {
-            output += percentEncodeNonAscii(code);
-          } else if (code <= 56319 && i + 1 < input.length) {
+          const code2 = input.charCodeAt(i);
+          if (code2 < 128) {
+            output += isEscapeSafe(code2) ? ch : BYTE_HEX[code2];
+          } else if (code2 < 55296 || code2 > 57343) {
+            output += percentEncodeNonAscii(code2);
+          } else if (code2 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3847,7 +3847,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3880,49 +3880,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative = parse3(serialize(relative, options), options);
+        relative2 = parse3(serialize(relative2, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative.scheme) {
-        target.scheme = relative.scheme;
-        target.userinfo = relative.userinfo;
-        target.host = relative.host;
-        target.port = relative.port;
-        target.path = removeDotSegments(relative.path || "");
-        target.query = relative.query;
+      if (!options.tolerant && relative2.scheme) {
+        target.scheme = relative2.scheme;
+        target.userinfo = relative2.userinfo;
+        target.host = relative2.host;
+        target.port = relative2.port;
+        target.path = removeDotSegments(relative2.path || "");
+        target.query = relative2.query;
       } else {
-        if (relative.userinfo !== void 0 || relative.host !== void 0 || relative.port !== void 0) {
-          target.userinfo = relative.userinfo;
-          target.host = relative.host;
-          target.port = relative.port;
-          target.path = removeDotSegments(relative.path || "");
-          target.query = relative.query;
+        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
+          target.userinfo = relative2.userinfo;
+          target.host = relative2.host;
+          target.port = relative2.port;
+          target.path = removeDotSegments(relative2.path || "");
+          target.query = relative2.query;
         } else {
-          if (!relative.path) {
+          if (!relative2.path) {
             target.path = base.path;
-            if (relative.query !== void 0) {
-              target.query = relative.query;
+            if (relative2.query !== void 0) {
+              target.query = relative2.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative.path[0] === "/") {
-              target.path = removeDotSegments(relative.path);
+            if (relative2.path[0] === "/") {
+              target.path = removeDotSegments(relative2.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative.path;
+                target.path = "/" + relative2.path;
               } else if (!base.path) {
-                target.path = relative.path;
+                target.path = relative2.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative.query;
+            target.query = relative2.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3930,7 +3930,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative.fragment;
+      target.fragment = relative2.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4216,7 +4216,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -6464,8 +6464,8 @@ var require_format = __commonJS({
             }
           }
           function getFormat(fmtDef) {
-            const code = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema)}` : void 0;
-            const fmt = gen.scopeValue("formats", { key: schema, ref: fmtDef, code });
+            const code2 = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema)}` : void 0;
+            const fmt = gen.scopeValue("formats", { key: schema, ref: fmtDef, code: code2 });
             if (typeof fmtDef == "object" && !(fmtDef instanceof RegExp)) {
               return [fmtDef.type || "string", fmtDef.validate, (0, codegen_1._)`${fmt}.validate`];
             }
@@ -10224,13 +10224,13 @@ function _array(Class2, element, params) {
   });
 }
 function _custom(Class2, fn, _params) {
-  const norm = normalizeParams(_params);
-  norm.abort ?? (norm.abort = true);
+  const norm2 = normalizeParams(_params);
+  norm2.abort ?? (norm2.abort = true);
   const schema = new Class2({
     type: "custom",
     check: "custom",
     fn,
-    ...norm
+    ...norm2
   });
   return schema;
 }
@@ -13207,23 +13207,23 @@ var ServerResultSchema = union([
   CreateTaskResultSchema
 ]);
 var McpError = class _McpError extends Error {
-  constructor(code, message, data) {
-    super(`MCP error ${code}: ${message}`);
-    this.code = code;
+  constructor(code2, message, data) {
+    super(`MCP error ${code2}: ${message}`);
+    this.code = code2;
     this.data = data;
     this.name = "McpError";
   }
   /**
    * Factory method to create the appropriate error type based on the error code and data
    */
-  static fromError(code, message, data) {
-    if (code === ErrorCode.UrlElicitationRequired && data) {
+  static fromError(code2, message, data) {
+    if (code2 === ErrorCode.UrlElicitationRequired && data) {
       const errorData = data;
       if (errorData.elicitations) {
         return new UrlElicitationRequiredError(errorData.elicitations, message);
       }
     }
-    return new _McpError(code, message, data);
+    return new _McpError(code2, message, data);
   }
 };
 var UrlElicitationRequiredError = class extends McpError {
@@ -13330,12 +13330,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve) => {
+    return new Promise((resolve3) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -19419,7 +19419,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -19436,7 +19436,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19514,7 +19514,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19775,12 +19775,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20871,7 +20871,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21440,6 +21440,9 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 var DEFAULT_BASE_URL = "https://api.futureelectronics.com";
 var MAX_CONCURRENCY_DEFAULT = 4;
 var MAX_CONCURRENCY_MIN = 1;
@@ -21518,11 +21521,34 @@ function loadMaxOutputTokens(env = process.env) {
     MAX_OUTPUT_TOKENS_MAX
   );
 }
+var WORKSPACE_FOLDER_NAME = "Future Electronics MCP";
+function isDirectory(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function defaultWorkspaceDir(home = homedir()) {
+  const documents = join(home, "Documents");
+  return join(isDirectory(documents) ? documents : home, WORKSPACE_FOLDER_NAME);
+}
+function loadWorkspaceDir(env = process.env, home = homedir()) {
+  const raw = env.FUTURE_WORKSPACE_DIR?.trim();
+  if (!raw || /^\$\{[^}]*\}$/.test(raw)) return defaultWorkspaceDir(home);
+  if (raw.includes("\0")) {
+    throw new ConfigError("FUTURE_WORKSPACE_DIR must not contain a NUL byte.");
+  }
+  if (!isAbsolute(raw)) {
+    throw new ConfigError("FUTURE_WORKSPACE_DIR must be an absolute path.");
+  }
+  return resolve(raw);
+}
 
 // src/rateLimit.ts
 var DEFAULT_MAX_CONCURRENCY = 4;
 var DEFAULT_MIN_INTERVAL_MS = 0;
-var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var defaultSleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
 var RateLimiter = class {
   maxConcurrency;
   minIntervalMs;
@@ -21579,7 +21605,7 @@ var RateLimiter = class {
     if (this.#active < this.maxConcurrency && this.#waiting.length === 0) {
       this.#active++;
     } else {
-      await new Promise((resolve) => this.#waiting.push(resolve));
+      await new Promise((resolve3) => this.#waiting.push(resolve3));
     }
     let released = false;
     const release = () => {
@@ -21828,7 +21854,7 @@ function retryDelayMs(retryAfter, attempt, now = Date.now()) {
   }
   return Math.min(delay, MAX_RETRY_DELAY_MS);
 }
-var defaultSleep2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var defaultSleep2 = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
 var FutureClient = class {
   #apiKey;
   #baseUrl;
@@ -22235,6 +22261,285 @@ function registerLookupPartTool(server, getClient) {
   );
 }
 
+// src/bomFile.ts
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { basename as basename2, extname, isAbsolute as isAbsolute3 } from "node:path";
+
+// src/workspace.ts
+import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute as isAbsolute2, join as join2, relative, resolve as resolve2, sep } from "node:path";
+var WorkspaceError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "WorkspaceError";
+  }
+};
+var MAX_QUOTED = 120;
+function quote(name) {
+  if (isAbsolute2(name)) name = basename(name);
+  const short = name.length > MAX_QUOTED ? `${name.slice(0, MAX_QUOTED)}...` : name;
+  return JSON.stringify(short);
+}
+function code(error2) {
+  return error2?.code;
+}
+function isWithin(parent, child) {
+  const rel = relative(parent, child);
+  return rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel);
+}
+async function realpathLoose(path) {
+  const rest = [];
+  let current = path;
+  for (; ; ) {
+    try {
+      await lstat(current);
+    } catch (error2) {
+      if (code(error2) !== "ENOENT" && code(error2) !== "ENOTDIR") throw error2;
+      const parent = dirname(current);
+      if (parent === current) return path;
+      rest.unshift(basename(current));
+      current = parent;
+      continue;
+    }
+    try {
+      return join2(await realpath(current), ...rest);
+    } catch (error2) {
+      if (code(error2) === "ENOENT") return void 0;
+      throw error2;
+    }
+  }
+}
+async function resolveInWorkspace(name, root = loadWorkspaceDir()) {
+  if (typeof name !== "string" || name.trim() === "") {
+    throw new WorkspaceError("A file name is required.");
+  }
+  if (name.includes("\0")) {
+    throw new WorkspaceError("The file name must not contain a NUL byte.");
+  }
+  const outside = () => new WorkspaceError(`${quote(name)} is outside the workspace folder. Use a name inside it.`);
+  const rootPath = resolve2(root);
+  const target = resolve2(rootPath, name);
+  const check2 = async (path) => {
+    try {
+      return await realpathLoose(path);
+    } catch (error2) {
+      throw new WorkspaceError(`Cannot check ${quote(name)} (${code(error2) ?? "error"}).`);
+    }
+  };
+  const realRoot = await check2(rootPath);
+  if (realRoot === void 0) {
+    throw new WorkspaceError("The workspace folder is a broken symlink.");
+  }
+  if (!isWithin(rootPath, target) && !isWithin(realRoot, target)) throw outside();
+  if (target === rootPath || target === realRoot) {
+    throw new WorkspaceError(`${quote(name)} is the workspace folder itself, not a file.`);
+  }
+  const realTarget = await check2(target);
+  if (realTarget === void 0) {
+    throw new WorkspaceError(`${quote(name)} is a broken symlink.`);
+  }
+  if (realTarget === realRoot || !isWithin(realRoot, realTarget)) throw outside();
+  return realTarget;
+}
+async function listFiles(ext, root = loadWorkspaceDir()) {
+  const wanted = (ext === void 0 ? [] : [ext].flat()).map(
+    (e) => `.${e.trim().replace(/^\./, "").toLowerCase()}`
+  );
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error2) {
+    if (code(error2) === "ENOENT") return [];
+    throw new WorkspaceError(`Cannot list the workspace folder (${code(error2) ?? "error"}).`);
+  }
+  const names = [];
+  for (const entry of entries) {
+    const name = entry.name;
+    if (name.startsWith(".")) continue;
+    if (wanted.length > 0 && !wanted.some((e) => name.toLowerCase().endsWith(e))) continue;
+    if (entry.isSymbolicLink()) {
+      try {
+        const real = await resolveInWorkspace(name, root);
+        if (!(await stat(real)).isFile()) continue;
+      } catch {
+        continue;
+      }
+    } else if (!entry.isFile()) {
+      continue;
+    }
+    names.push(name);
+  }
+  return names.sort();
+}
+
+// src/bomFile.ts
+var MAX_BOM_BYTES = 5 * 1024 * 1024;
+var BOM_EXTENSIONS = [".csv", ".tsv"];
+var DELIMITERS = [",", ";", "	"];
+var PART_ALIASES = ["mpn", "manufacturer part number", "part number", "part_number", "mfr part", "pn"];
+var QUANTITY_ALIASES = ["qty", "quantity", "quantity per", "count"];
+var BomFileError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "BomFileError";
+  }
+};
+var columnSchema = external_exports.union([external_exports.string().trim().min(1), external_exports.number().int().positive()]);
+var bomFileSchema = external_exports.object({
+  path: external_exports.string().min(1).describe('File name in the workspace folder, e.g. "bom.csv" (.csv or .tsv).'),
+  part_column: columnSchema.optional().describe("Part number column: header name or 1-based column number. Default: auto-detect."),
+  quantity_column: columnSchema.optional().describe("Quantity column: header name or 1-based column number. Default: auto-detect."),
+  has_header: external_exports.boolean().default(true).describe("First row is a header row (default true)."),
+  delimiter: external_exports.enum(DELIMITERS).optional().describe('"," ";" or tab. Default: auto-detect from the first line.')
+});
+function displayName(name) {
+  const shown = isAbsolute3(name) ? basename2(name) : name;
+  return JSON.stringify(shown.length > 120 ? `${shown.slice(0, 120)}...` : shown);
+}
+function detectDelimiter(text, fallback = ",") {
+  const counts = new Map(DELIMITERS.map((d) => [d, 0]));
+  let quoted = false;
+  for (const c of text) {
+    if (c === '"') quoted = !quoted;
+    else if (!quoted && (c === "\n" || c === "\r")) break;
+    else if (!quoted && counts.has(c)) counts.set(c, counts.get(c) + 1);
+  }
+  const max = Math.max(...counts.values());
+  if (counts.get(fallback) === max) return fallback;
+  return DELIMITERS.find((d) => counts.get(d) === max);
+}
+function parseCsv(text, delimiter) {
+  const records = [];
+  let record2 = [];
+  let field = "";
+  let inQuotes = false;
+  let wasQuoted = false;
+  let quoteStart = 0;
+  const endField = () => {
+    record2.push(field);
+    field = "";
+    wasQuoted = false;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c !== '"') field += c;
+      else if (text[i + 1] === '"') field += '"', i++;
+      else inQuotes = false;
+    } else if (c === '"' && field === "" && !wasQuoted) {
+      inQuotes = wasQuoted = true;
+      quoteStart = records.length + 1;
+    } else if (c === delimiter) {
+      endField();
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      endField();
+      records.push(record2);
+      record2 = [];
+    } else {
+      field += c;
+    }
+  }
+  if (inQuotes) throw new BomFileError(`Row ${quoteStart} has a quoted field that is never closed.`);
+  if (field !== "" || wasQuoted || record2.length > 0) {
+    endField();
+    records.push(record2);
+  }
+  return records;
+}
+var norm = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
+function listHeaders(headers) {
+  const shown = headers.slice(0, 40).map((h) => JSON.stringify(h.trim().slice(0, 60)));
+  return shown.join(", ") + (headers.length > 40 ? `, and ${headers.length - 40} more` : "");
+}
+function findColumn(headers, named, aliases, kind) {
+  const found = headers === void 0 ? "The file has no header row." : `Headers found: ${listHeaders(headers)}.`;
+  if (named !== void 0) {
+    const matches2 = headers ? headers.flatMap((h, i) => norm(h) === norm(String(named)) ? [i] : []) : [];
+    if (matches2.length === 1) return matches2[0];
+    if (matches2.length > 1) throw new BomFileError(`More than one column is named ${JSON.stringify(String(named))}. ${found}`);
+    const n = typeof named === "number" ? named : /^\d+$/.test(named.trim()) ? Number(named) : NaN;
+    if (n >= 1) return n - 1;
+    throw new BomFileError(`No ${kind} column named ${JSON.stringify(named)}. ${found}`);
+  }
+  if (headers === void 0) return void 0;
+  const matches = headers.flatMap((h, i) => aliases.includes(norm(h)) ? [i] : []);
+  if (matches.length > 1) {
+    throw new BomFileError(
+      `Several columns could be the ${kind} column (${listHeaders(matches.map((i) => headers[i]))}). Name one with ${kind}_column. ${found}`
+    );
+  }
+  return matches[0];
+}
+async function readBomText(name, root) {
+  const shown = displayName(name);
+  if (!BOM_EXTENSIONS.includes(extname(name).toLowerCase())) {
+    throw new BomFileError(`${shown} is not a .csv or .tsv file.`);
+  }
+  const real = await resolveInWorkspace(name, root);
+  let fh;
+  try {
+    fh = await open(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (error2) {
+    const code2 = error2.code;
+    if (code2 === "ENOENT") {
+      throw new BomFileError(`${shown} was not found in the workspace folder. Use future_list_bom_files to see the files there.`);
+    }
+    throw new BomFileError(`Cannot open ${shown} (${code2 ?? "error"}).`);
+  }
+  try {
+    const st = await fh.stat();
+    if (!st.isFile()) throw new BomFileError(`${shown} is not a file.`);
+    const tooBig = () => new BomFileError(`${shown} is larger than the ${MAX_BOM_BYTES / 1024 / 1024} MB limit.`);
+    if (st.size > MAX_BOM_BYTES) throw tooBig();
+    const bytes = await fh.readFile();
+    if (bytes.length > MAX_BOM_BYTES) throw tooBig();
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^﻿/, "");
+    } catch {
+      throw new BomFileError(`${shown} is not valid UTF-8 text. Save it as "CSV UTF-8".`);
+    }
+  } finally {
+    await fh.close();
+  }
+}
+async function loadBomFile(spec, root = loadWorkspaceDir()) {
+  const text = await readBomText(spec.path, root);
+  const fallback = extname(spec.path).toLowerCase() === ".tsv" ? "	" : ",";
+  const records = parseCsv(text, spec.delimiter ?? detectDelimiter(text, fallback));
+  const hasHeader = spec.has_header ?? true;
+  const headers = hasHeader ? records[0] : void 0;
+  if (hasHeader && headers === void 0) throw new BomFileError(`${displayName(spec.path)} is empty.`);
+  const partIdx = findColumn(headers, spec.part_column, PART_ALIASES, "part") ?? (hasHeader ? void 0 : 0);
+  if (partIdx === void 0) {
+    throw new BomFileError(
+      `No part number column found. Name one with part_column. Headers found: ${listHeaders(headers)}.`
+    );
+  }
+  const qtyIdx = findColumn(headers, spec.quantity_column, QUANTITY_ALIASES, "quantity");
+  const label = (i) => headers?.[i]?.trim() || `column ${i + 1}`;
+  const rows = [];
+  let read = 0;
+  let skipped = 0;
+  records.forEach((record2, i) => {
+    if (hasHeader && i === 0 || record2.every((cell) => cell.trim() === "")) return;
+    read++;
+    const part_number = record2[partIdx]?.trim() ?? "";
+    if (part_number === "") return void skipped++;
+    const quantity = qtyIdx === void 0 ? "" : record2[qtyIdx]?.trim() ?? "";
+    rows.push(quantity === "" ? { row: i + 1, part_number } : { row: i + 1, part_number, quantity });
+  });
+  const source = {
+    file: isAbsolute3(spec.path) ? basename2(spec.path) : spec.path,
+    rows_read: read,
+    rows_skipped: skipped,
+    part_column: label(partIdx),
+    quantity_column: qtyIdx === void 0 ? null : label(qtyIdx)
+  };
+  return { rows, source };
+}
+
 // src/results.ts
 import { randomUUID } from "node:crypto";
 var RESULT_TTL_MS = 60 * 60 * 1e3;
@@ -22314,8 +22619,11 @@ var partItemSchema = external_exports.union([
   })
 ]);
 var lookupPartsInputShape = {
-  parts: external_exports.array(partItemSchema).min(1).max(MAX_LOOKUP_PARTS).describe(
-    `1-${MAX_LOOKUP_PARTS} manufacturer part numbers. Each item is a string ("LM317T") or {"part_number": "LM317T", "quantity": 500}. Quantity is optional (positive integer) and selects the price break; duplicates are merged and their quantities summed.`
+  parts: external_exports.array(partItemSchema).min(1).max(MAX_LOOKUP_PARTS).optional().describe(
+    `1-${MAX_LOOKUP_PARTS} manufacturer part numbers. Each item is a string ("LM317T") or {"part_number": "LM317T", "quantity": 500}. Quantity is optional (positive integer) and selects the price break; duplicates are merged and their quantities summed. Give exactly one of parts or bom_file.`
+  ),
+  bom_file: bomFileSchema.optional().describe(
+    "Read the parts from a .csv/.tsv file in the workspace folder instead of listing them (future_list_bom_files lists the files). Give exactly one of parts or bom_file."
   ),
   detail: external_exports.enum(["summary", "all"]).default("summary").describe(
     '"summary" (default): totals plus a table of problem parts only. "all": a table row for every part. Both are capped by the output budget.'
@@ -22324,7 +22632,10 @@ var lookupPartsInputShape = {
     "Return the untouched upstream batch responses instead of the summary. Far larger, so whole batches are usually dropped by the output budget; use only for one small batch."
   )
 };
-var LOOKUP_PARTS_DESCRIPTION = `Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. Each part is judged on its best offer (the most stock) at the requested quantity (1 when none is given). By default it returns exceptions and totals, not every part: totals (requested, unique, found, not_found, errors, not_attempted, short_stock, below_moq, call_for_leadtime, batches, rate_limited), extended_cost (quantity x applicable unit price, summed per currency), unpriced (found parts with no applicable price break, left out of extended_cost), max_lead_time, and an issues table {columns, rows} listing ONLY problem parts. Problems: short_stock (available < quantity), below_moq (a given quantity < the minimum order), call_for_leadtime (lead time "CALL"), not_found, error, not_attempted; one part can have several, joined by ";" in its reason. Parts with no problem appear only in the counts. detail "all" returns a parts table with a row for every part instead. Output is capped at FUTURE_MAX_OUTPUT_TOKENS: when rows are dropped, truncated {omitted, hint} says so. If one batch fails, its parts get the error and the rest are still returned. If the API rate limit is still hit after retries, the lookup stops early: batches already running finish, and parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited is true). Prices are not an official quote. Use the single-part lookup tool for full offer details of one part. Every response includes a result_id: to see any other rows or columns of this lookup (filtered, paged), call future_query_results with it instead of re-running the lookup. Results are kept in memory for 60 minutes after last use.`;
+var LOOKUP_PARTS_DESCRIPTION = `Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. Each part is judged on its best offer (the most stock) at the requested quantity (1 when none is given). By default it returns exceptions and totals, not every part: totals (requested, unique, found, not_found, errors, not_attempted, short_stock, below_moq, call_for_leadtime, batches, rate_limited), extended_cost (quantity x applicable unit price, summed per currency), unpriced (found parts with no applicable price break, left out of extended_cost), max_lead_time, and an issues table {columns, rows} listing ONLY problem parts. Problems: short_stock (available < quantity), below_moq (a given quantity < the minimum order), call_for_leadtime (lead time "CALL"), not_found, error, not_attempted; one part can have several, joined by ";" in its reason. Parts with no problem appear only in the counts. detail "all" returns a parts table with a row for every part instead. Output is capped at FUTURE_MAX_OUTPUT_TOKENS: when rows are dropped, truncated {omitted, hint} says so. If one batch fails, its parts get the error and the rest are still returned. If the API rate limit is still hit after retries, the lookup stops early: batches already running finish, and parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited is true). Prices are not an official quote. Use the single-part lookup tool for full offer details of one part. Every response includes a result_id: to see any other rows or columns of this lookup (filtered, paged), call future_query_results with it instead of re-running the lookup. Results are kept in memory for 60 minutes after last use. Instead of parts, bom_file reads a CSV/TSV BOM from the workspace folder (part and quantity columns auto-detected by header); the result then includes source {file, rows_read, rows_skipped, part_column, quantity_column}.`;
+var hasExactlyOneInput = (v) => v.parts === void 0 !== (v.bom_file === void 0);
+var EXACTLY_ONE_MESSAGE = "Give exactly one of parts or bom_file.";
+var lookupPartsInputSchema = external_exports.object(lookupPartsInputShape).refine(hasExactlyOneInput, { message: EXACTLY_ONE_MESSAGE });
 var TRUNCATION_HINT = "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Page through every part with future_query_results and this result_id, or raise FUTURE_MAX_OUTPUT_TOKENS.";
 var ISSUE_COLUMNS = ["part_number", "status", "reason", "quantity", "available", "lead_time"];
 var PART_COLUMNS = [
@@ -22497,6 +22808,42 @@ function errorPart(part, message, status = "error") {
     error: message
   };
 }
+var MAX_ROW_ERRORS = 10;
+async function resolveParts(input, root) {
+  const fail = (text) => ({ content: [{ type: "text", text }], isError: true });
+  if (!hasExactlyOneInput(input)) return fail(EXACTLY_ONE_MESSAGE);
+  if (input.parts) return { items: input.parts };
+  let bom;
+  try {
+    bom = await loadBomFile(input.bom_file, root);
+  } catch (error2) {
+    if (error2 instanceof BomFileError || error2 instanceof WorkspaceError) return fail(error2.message);
+    return errorResult(error2);
+  }
+  const { rows, source } = bom;
+  const items = [];
+  const bad = [];
+  for (const r of rows) {
+    const q = r.quantity === void 0 ? void 0 : /^\d+(\.\d+)?$/.test(r.quantity) ? Number(r.quantity) : NaN;
+    const parsed = partItemSchema.safeParse(q === void 0 ? { part_number: r.part_number } : { part_number: r.part_number, quantity: q });
+    if (parsed.success) items.push(parsed.data);
+    else bad.push(`row ${r.row} (${JSON.stringify(r.quantity?.slice(0, 20))})`);
+  }
+  if (bad.length > 0) {
+    const more = bad.length > MAX_ROW_ERRORS ? `, and ${bad.length - MAX_ROW_ERRORS} more` : "";
+    return fail(
+      `Invalid quantity in ${bad.slice(0, MAX_ROW_ERRORS).join(", ")}${more}. A quantity must be a whole number from 1 to ${MAX_QUANTITY}, or empty.`
+    );
+  }
+  if (items.length === 0) {
+    return fail(`No part numbers found in ${JSON.stringify(source.file)} (${source.rows_read} rows read, ${source.rows_skipped} skipped).`);
+  }
+  const unique = dedupeParts(items).length;
+  if (unique > MAX_LOOKUP_PARTS) {
+    return fail(`The file has ${unique} unique part numbers; the limit is ${MAX_LOOKUP_PARTS}. Split the file.`);
+  }
+  return { items, source };
+}
 async function lookupParts(input, getClient, maxOutputTokens, store = defaultResultStore) {
   let budget;
   try {
@@ -22504,7 +22851,10 @@ async function lookupParts(input, getClient, maxOutputTokens, store = defaultRes
   } catch (error2) {
     return errorResult(error2);
   }
-  const unique = dedupeParts(input.parts);
+  const resolved = await resolveParts(input);
+  if ("content" in resolved) return resolved;
+  const { items, source } = resolved;
+  const unique = dedupeParts(items);
   const results = /* @__PURE__ */ new Map();
   const sendable = [];
   for (const part of unique) {
@@ -22563,7 +22913,7 @@ async function lookupParts(input, getClient, maxOutputTokens, store = defaultRes
   const reasons = parts.map(problemReasons);
   const countReason = (r) => reasons.filter((rs) => rs.includes(r)).length;
   const totals = {
-    requested: input.parts.length,
+    requested: items.length,
     unique: unique.length,
     found: count("found"),
     not_found: count("not_found"),
@@ -22583,6 +22933,7 @@ async function lookupParts(input, getClient, maxOutputTokens, store = defaultRes
     {
       result_id,
       note: PRICING_DISCLAIMER,
+      ...source ? { source } : {},
       totals,
       batches: rawBatches,
       ...invalid.length > 0 ? { invalid_parts: invalid } : {}
@@ -22594,6 +22945,7 @@ async function lookupParts(input, getClient, maxOutputTokens, store = defaultRes
     {
       result_id,
       note: PRICING_DISCLAIMER,
+      ...source ? { source } : {},
       totals,
       ...extendedCost(parts),
       max_lead_time: maxLeadTime(parts),
@@ -22617,6 +22969,47 @@ function registerLookupPartsTool(server, getClient) {
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
     async (args) => lookupParts(args, getClient)
+  );
+}
+
+// src/tools/listBomFiles.ts
+import { stat as stat2 } from "node:fs/promises";
+var LIST_BOM_FILES_TOOL_NAME = "future_list_bom_files";
+var BOM_FILE_COLUMNS = ["name", "size_bytes", "modified"];
+var LIST_BOM_FILES_DESCRIPTION = "List the BOM files (.csv and .tsv) in the workspace folder, with name, size_bytes and modified time (ISO 8601), as a files table {columns, rows}. Pass a name to future_lookup_parts as bom_file.path to look up that BOM.";
+async function listBomFiles(root, maxOutputTokens) {
+  const fail = (text) => ({ content: [{ type: "text", text }], isError: true });
+  try {
+    const dir = root ?? loadWorkspaceDir();
+    const budget = maxOutputTokens ?? loadMaxOutputTokens();
+    const rows = [];
+    for (const name of await listFiles(BOM_EXTENSIONS, dir)) {
+      try {
+        const st = await stat2(await resolveInWorkspace(name, dir));
+        if (st.isFile()) rows.push([name, st.size, st.mtime.toISOString()]);
+      } catch {
+      }
+    }
+    const value = { files: { columns: BOM_FILE_COLUMNS, rows } };
+    if (rows.length === 0) {
+      value.note = "No .csv or .tsv files in the workspace folder. Save the BOM there first.";
+    }
+    return budgetedResult(value, ["files.rows"], budget);
+  } catch (error2) {
+    if (error2 instanceof WorkspaceError || error2 instanceof ConfigError) return fail(error2.message);
+    return fail("Unexpected error while listing the workspace folder.");
+  }
+}
+function registerListBomFilesTool(server) {
+  server.registerTool(
+    LIST_BOM_FILES_TOOL_NAME,
+    {
+      title: "List BOM files in the workspace",
+      description: LIST_BOM_FILES_DESCRIPTION,
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false }
+    },
+    async () => listBomFiles()
   );
 }
 
@@ -22729,6 +23122,7 @@ var SERVER_VERSION = "0.1.0";
 function registerTools(server, getClient = lazyClientProvider()) {
   registerLookupPartTool(server, getClient);
   registerLookupPartsTool(server, getClient);
+  registerListBomFilesTool(server);
   registerQueryResultsTool(server);
 }
 function createServer(getClient = lazyClientProvider()) {
