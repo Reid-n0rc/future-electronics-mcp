@@ -26,6 +26,9 @@
 //   longest lead time, plus an `issues` table listing only problem parts, so
 //   its size grows with the number of problems, not with the BOM. Every
 //   result is compact JSON capped by FUTURE_MAX_OUTPUT_TOKENS (src/output.ts).
+// - Every run stores its full per-part results and raw batch responses in the
+//   result store (src/results.ts, issue #42), and the output carries the
+//   `result_id` that `future_query_results` reads them back by.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -35,6 +38,7 @@ import { FutureApiError, MAX_BATCH_PARTS, validatePartNumber } from "../client.j
 import { loadMaxOutputTokens } from "../config.js";
 import { PRICING_DISCLAIMER, priceAt, summarizeOffer, type PriceAtResult } from "../format.js";
 import { budgetedResult } from "../output.js";
+import { defaultResultStore, type ResultStore } from "../results.js";
 import type { BatchLookupPart, BatchLookupResponse, Offer } from "../types.js";
 import { WorkspaceError } from "../workspace.js";
 import { errorResult, type ClientProvider } from "./common.js";
@@ -122,7 +126,10 @@ export const LOOKUP_PARTS_DESCRIPTION =
   "is still hit after retries, the lookup stops early: batches already running finish, and " +
   'parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited ' +
   "is true). Prices are not an official quote. Use the single-part lookup tool for full offer " +
-  "details of one part. Instead of parts, bom_file reads a CSV/TSV BOM from the workspace " +
+  "details of one part. Every response includes a result_id: to see any other rows or columns " +
+  "of this lookup (filtered, paged), call future_query_results with it instead of re-running " +
+  "the lookup. Results are kept in memory for 60 minutes after last use. " +
+  "Instead of parts, bom_file reads a CSV/TSV BOM from the workspace " +
   "folder (part and quantity columns auto-detected by header); the result then includes " +
   "source {file, rows_read, rows_skipped, part_column, quantity_column}.";
 
@@ -137,8 +144,8 @@ export const lookupPartsInputSchema = z
 
 /** Hint attached when the output budget drops rows. */
 export const TRUNCATION_HINT =
-  "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Look up the omitted parts " +
-  "in a smaller request, or raise FUTURE_MAX_OUTPUT_TOKENS.";
+  "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Page through every part with " +
+  "future_query_results and this result_id, or raise FUTURE_MAX_OUTPUT_TOKENS.";
 
 export type PartStatus = "found" | "not_found" | "error" | "not_attempted";
 
@@ -370,7 +377,7 @@ function partResult(part: UniquePart, entry: BatchLookupPart | undefined): PartR
   return result;
 }
 
-type RawBatch =
+export type RawBatch =
   | { part_numbers: string[]; response: BatchLookupResponse }
   | { part_numbers: string[]; error: string }
   | { part_numbers: string[]; not_attempted: true; error: string };
@@ -448,6 +455,7 @@ export async function lookupParts(
   input: LookupPartsInput,
   getClient: ClientProvider,
   maxOutputTokens?: number,
+  store: ResultStore = defaultResultStore,
 ): Promise<CallToolResult> {
   let budget: number;
   try {
@@ -542,10 +550,12 @@ export async function lookupParts(
   const invalid = parts
     .filter((p) => !sent.has(p.part_number))
     .map((p) => ({ part_number: p.part_number, error: p.error }));
+  const result_id = store.put({ parts, batches: rawBatches, totals });
   const all = input.detail === "all";
   const result = input.raw
     ? budgetedResult(
         {
+          result_id,
           note: PRICING_DISCLAIMER,
           ...(source ? { source } : {}),
           totals,
@@ -558,6 +568,7 @@ export async function lookupParts(
       )
     : budgetedResult(
         {
+          result_id,
           note: PRICING_DISCLAIMER,
           ...(source ? { source } : {}),
           totals,

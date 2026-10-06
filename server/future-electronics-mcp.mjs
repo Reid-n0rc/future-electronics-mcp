@@ -15687,8 +15687,8 @@ function deepPartialify(schema) {
   if (schema instanceof ZodObject2) {
     const newShape = {};
     for (const key in schema.shape) {
-      const fieldSchema = schema.shape[key];
-      newShape[key] = ZodOptional2.create(deepPartialify(fieldSchema));
+      const fieldSchema2 = schema.shape[key];
+      newShape[key] = ZodOptional2.create(deepPartialify(fieldSchema2));
     }
     return new ZodObject2({
       ...schema._def,
@@ -15985,11 +15985,11 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
   partial(mask) {
     const newShape = {};
     for (const key of util.objectKeys(this.shape)) {
-      const fieldSchema = this.shape[key];
+      const fieldSchema2 = this.shape[key];
       if (mask && !mask[key]) {
-        newShape[key] = fieldSchema;
+        newShape[key] = fieldSchema2;
       } else {
-        newShape[key] = fieldSchema.optional();
+        newShape[key] = fieldSchema2.optional();
       }
     }
     return new _ZodObject({
@@ -16003,8 +16003,8 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
       if (mask && !mask[key]) {
         newShape[key] = this.shape[key];
       } else {
-        const fieldSchema = this.shape[key];
-        let newField = fieldSchema;
+        const fieldSchema2 = this.shape[key];
+        let newField = fieldSchema2;
         while (newField instanceof ZodOptional2) {
           newField = newField._def.innerType;
         }
@@ -22540,6 +22540,70 @@ async function loadBomFile(spec, root = loadWorkspaceDir()) {
   return { rows, source };
 }
 
+// src/results.ts
+import { randomUUID } from "node:crypto";
+var RESULT_TTL_MS = 60 * 60 * 1e3;
+var MAX_STORED_RESULTS = 20;
+function unknownResultMessage(id) {
+  return `Unknown or expired result_id "${id}". Results are kept in memory for ${RESULT_TTL_MS / 6e4} minutes after last use (at most ${MAX_STORED_RESULTS}, least recently used evicted first) and are lost when the server restarts. Run future_lookup_parts again to get a new result_id.`;
+}
+var ResultStore = class {
+  entries = /* @__PURE__ */ new Map();
+  ttlMs;
+  maxEntries;
+  now;
+  newId;
+  constructor(options = {}) {
+    const { ttlMs = RESULT_TTL_MS, maxEntries = MAX_STORED_RESULTS } = options;
+    if (!(ttlMs > 0)) throw new RangeError("ttlMs must be positive");
+    if (!Number.isInteger(maxEntries) || maxEntries < 1) {
+      throw new RangeError("maxEntries must be a positive integer");
+    }
+    this.ttlMs = ttlMs;
+    this.maxEntries = maxEntries;
+    this.now = options.now ?? Date.now;
+    this.newId = options.newId ?? randomUUID;
+  }
+  /** Number of live (unexpired) entries. */
+  get size() {
+    this.purgeExpired();
+    return this.entries.size;
+  }
+  /** Store a result and return its new id, evicting the least recently used if full. */
+  put(data) {
+    this.purgeExpired();
+    let id = this.newId();
+    while (this.entries.has(id)) id = this.newId();
+    const t = this.now();
+    this.entries.set(id, { value: { ...data, created_at: t }, lastAccess: t });
+    while (this.entries.size > this.maxEntries) {
+      this.entries.delete(this.entries.keys().next().value);
+    }
+    return id;
+  }
+  /** The stored result, or undefined when unknown or expired. Refreshes its TTL and LRU position. */
+  get(id) {
+    this.purgeExpired();
+    const entry = this.entries.get(id);
+    if (!entry) return void 0;
+    entry.lastAccess = this.now();
+    this.entries.delete(id);
+    this.entries.set(id, entry);
+    return entry.value;
+  }
+  /** Drop every entry. */
+  clear() {
+    this.entries.clear();
+  }
+  purgeExpired() {
+    const t = this.now();
+    for (const [id, entry] of this.entries) {
+      if (t - entry.lastAccess >= this.ttlMs) this.entries.delete(id);
+    }
+  }
+};
+var defaultResultStore = new ResultStore();
+
 // src/tools/lookupParts.ts
 var LOOKUP_PARTS_TOOL_NAME = "future_lookup_parts";
 var MAX_LOOKUP_PARTS = 2e3;
@@ -22568,11 +22632,11 @@ var lookupPartsInputShape = {
     "Return the untouched upstream batch responses instead of the summary. Far larger, so whole batches are usually dropped by the output budget; use only for one small batch."
   )
 };
-var LOOKUP_PARTS_DESCRIPTION = `Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. Each part is judged on its best offer (the most stock) at the requested quantity (1 when none is given). By default it returns exceptions and totals, not every part: totals (requested, unique, found, not_found, errors, not_attempted, short_stock, below_moq, call_for_leadtime, batches, rate_limited), extended_cost (quantity x applicable unit price, summed per currency), unpriced (found parts with no applicable price break, left out of extended_cost), max_lead_time, and an issues table {columns, rows} listing ONLY problem parts. Problems: short_stock (available < quantity), below_moq (a given quantity < the minimum order), call_for_leadtime (lead time "CALL"), not_found, error, not_attempted; one part can have several, joined by ";" in its reason. Parts with no problem appear only in the counts. detail "all" returns a parts table with a row for every part instead. Output is capped at FUTURE_MAX_OUTPUT_TOKENS: when rows are dropped, truncated {omitted, hint} says so. If one batch fails, its parts get the error and the rest are still returned. If the API rate limit is still hit after retries, the lookup stops early: batches already running finish, and parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited is true). Prices are not an official quote. Use the single-part lookup tool for full offer details of one part. Instead of parts, bom_file reads a CSV/TSV BOM from the workspace folder (part and quantity columns auto-detected by header); the result then includes source {file, rows_read, rows_skipped, part_column, quantity_column}.`;
+var LOOKUP_PARTS_DESCRIPTION = `Look up many Future Electronics parts at once, e.g. a whole bill of materials (BOM). Accepts up to ${MAX_LOOKUP_PARTS} part numbers, each optionally with a quantity. Part numbers are trimmed and de-duplicated case-insensitively (quantities of duplicates are summed), then sent in batches of ${MAX_BATCH_PARTS}, several batches in parallel. Each part is judged on its best offer (the most stock) at the requested quantity (1 when none is given). By default it returns exceptions and totals, not every part: totals (requested, unique, found, not_found, errors, not_attempted, short_stock, below_moq, call_for_leadtime, batches, rate_limited), extended_cost (quantity x applicable unit price, summed per currency), unpriced (found parts with no applicable price break, left out of extended_cost), max_lead_time, and an issues table {columns, rows} listing ONLY problem parts. Problems: short_stock (available < quantity), below_moq (a given quantity < the minimum order), call_for_leadtime (lead time "CALL"), not_found, error, not_attempted; one part can have several, joined by ";" in its reason. Parts with no problem appear only in the counts. detail "all" returns a parts table with a row for every part instead. Output is capped at FUTURE_MAX_OUTPUT_TOKENS: when rows are dropped, truncated {omitted, hint} says so. If one batch fails, its parts get the error and the rest are still returned. If the API rate limit is still hit after retries, the lookup stops early: batches already running finish, and parts in batches not yet started are "not_attempted" (retry them later; totals.rate_limited is true). Prices are not an official quote. Use the single-part lookup tool for full offer details of one part. Every response includes a result_id: to see any other rows or columns of this lookup (filtered, paged), call future_query_results with it instead of re-running the lookup. Results are kept in memory for 60 minutes after last use. Instead of parts, bom_file reads a CSV/TSV BOM from the workspace folder (part and quantity columns auto-detected by header); the result then includes source {file, rows_read, rows_skipped, part_column, quantity_column}.`;
 var hasExactlyOneInput = (v) => v.parts === void 0 !== (v.bom_file === void 0);
 var EXACTLY_ONE_MESSAGE = "Give exactly one of parts or bom_file.";
 var lookupPartsInputSchema = external_exports.object(lookupPartsInputShape).refine(hasExactlyOneInput, { message: EXACTLY_ONE_MESSAGE });
-var TRUNCATION_HINT = "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Look up the omitted parts in a smaller request, or raise FUTURE_MAX_OUTPUT_TOKENS.";
+var TRUNCATION_HINT = "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Page through every part with future_query_results and this result_id, or raise FUTURE_MAX_OUTPUT_TOKENS.";
 var ISSUE_COLUMNS = ["part_number", "status", "reason", "quantity", "available", "lead_time"];
 var PART_COLUMNS = [
   "part_number",
@@ -22780,7 +22844,7 @@ async function resolveParts(input, root) {
   }
   return { items, source };
 }
-async function lookupParts(input, getClient, maxOutputTokens) {
+async function lookupParts(input, getClient, maxOutputTokens, store = defaultResultStore) {
   let budget;
   try {
     budget = maxOutputTokens ?? loadMaxOutputTokens();
@@ -22863,9 +22927,11 @@ async function lookupParts(input, getClient, maxOutputTokens) {
   };
   const sent = new Set(sendable.map((s) => s.part_number));
   const invalid = parts.filter((p) => !sent.has(p.part_number)).map((p) => ({ part_number: p.part_number, error: p.error }));
+  const result_id = store.put({ parts, batches: rawBatches, totals });
   const all = input.detail === "all";
   const result = input.raw ? budgetedResult(
     {
+      result_id,
       note: PRICING_DISCLAIMER,
       ...source ? { source } : {},
       totals,
@@ -22877,6 +22943,7 @@ async function lookupParts(input, getClient, maxOutputTokens) {
     TRUNCATION_HINT
   ) : budgetedResult(
     {
+      result_id,
       note: PRICING_DISCLAIMER,
       ...source ? { source } : {},
       totals,
@@ -22946,6 +23013,109 @@ function registerListBomFilesTool(server) {
   );
 }
 
+// src/tools/queryResults.ts
+var QUERY_RESULTS_TOOL_NAME = "future_query_results";
+var DEFAULT_QUERY_LIMIT = 50;
+var MAX_QUERY_LIMIT = 500;
+var PART_STATUSES = [
+  "found",
+  "not_found",
+  "error",
+  "not_attempted"
+];
+var QUERY_COLUMNS = PART_COLUMNS;
+var QUERY_TRUNCATION_HINT = "Rows were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Continue from next_offset, request fewer fields, or use a smaller limit.";
+var fieldSchema = external_exports.enum(QUERY_COLUMNS, {
+  errorMap: () => ({ message: `Unknown field. Valid fields: ${QUERY_COLUMNS.join(", ")}.` })
+});
+var statusSchema = external_exports.enum(PART_STATUSES, {
+  errorMap: () => ({ message: `Unknown status. Valid statuses: ${PART_STATUSES.join(", ")}.` })
+});
+var queryResultsInputShape = {
+  result_id: external_exports.string().min(1).describe("The result_id returned by future_lookup_parts."),
+  status: external_exports.array(statusSchema).min(1).optional().describe(`Keep only parts with one of these statuses: ${PART_STATUSES.join(", ")}.`),
+  min_lead_time_weeks: external_exports.number().nonnegative().optional().describe(
+    'Keep only parts whose lead time is at least this many weeks. Parts with an unknown or "CALL" lead time are excluded.'
+  ),
+  short_stock: external_exports.boolean().optional().describe("true: only parts with available < quantity. false: only parts without that problem."),
+  below_moq: external_exports.boolean().optional().describe("true: only parts whose given quantity is below the MOQ. false: only parts without it."),
+  part_numbers: external_exports.array(external_exports.string()).min(1).optional().describe("Keep only these part numbers (case-insensitive, as sent to future_lookup_parts)."),
+  fields: external_exports.array(fieldSchema).min(1).optional().describe(`Columns to return, in this order (default: all). Valid: ${QUERY_COLUMNS.join(", ")}.`),
+  offset: external_exports.number().int().nonnegative().default(0).describe("Matching rows to skip (default 0)."),
+  limit: external_exports.number().int().min(1).max(MAX_QUERY_LIMIT).default(DEFAULT_QUERY_LIMIT).describe(`Rows to return (default ${DEFAULT_QUERY_LIMIT}, max ${MAX_QUERY_LIMIT}).`)
+};
+var QUERY_RESULTS_DESCRIPTION = `Query a stored future_lookup_parts result by its result_id, without calling the Future API again. Use this instead of re-running a BOM lookup to see parts the summary left out, other columns, or a filtered subset. Filters (all optional, combined with AND): status[] (${PART_STATUSES.join(", ")}), min_lead_time_weeks, short_stock, below_moq, part_numbers[]. fields[] picks columns from: ${QUERY_COLUMNS.join(", ")}. Paged with offset and limit (default ${DEFAULT_QUERY_LIMIT}, max ${MAX_QUERY_LIMIT}). Returns total_matching, next_offset (null on the last page) and a {columns, rows} table, capped at FUTURE_MAX_OUTPUT_TOKENS. Results expire 60 minutes after last use.`;
+function filterParts(parts, input) {
+  const statuses = input.status ? new Set(input.status) : void 0;
+  const names = input.part_numbers ? new Set(input.part_numbers.map((p) => p.trim().toLowerCase())) : void 0;
+  const minDays = input.min_lead_time_weeks === void 0 ? void 0 : input.min_lead_time_weeks * 7;
+  return parts.filter((p) => {
+    if (statuses && !statuses.has(p.status)) return false;
+    if (names && !names.has(p.part_number.toLowerCase())) return false;
+    if (minDays !== void 0) {
+      const days = leadTimeDays(p.lead_time);
+      if (days === void 0 || days < minDays) return false;
+    }
+    const reasons = problemReasons(p);
+    if (input.short_stock !== void 0 && reasons.includes("short_stock") !== input.short_stock) {
+      return false;
+    }
+    if (input.below_moq !== void 0 && reasons.includes("below_moq") !== input.below_moq) {
+      return false;
+    }
+    return true;
+  });
+}
+function queryResults(input, store = defaultResultStore, maxOutputTokens) {
+  let budget;
+  try {
+    budget = maxOutputTokens ?? loadMaxOutputTokens();
+  } catch (error2) {
+    return errorResult(error2);
+  }
+  const stored = store.get(input.result_id);
+  if (!stored) return { content: [{ type: "text", text: unknownResultMessage(input.result_id) }], isError: true };
+  const fields = input.fields ?? QUERY_COLUMNS;
+  const unknown2 = fields.filter((f) => !QUERY_COLUMNS.includes(f));
+  if (unknown2.length > 0) {
+    const text = `Unknown field(s): ${unknown2.join(", ")}. Valid fields: ${QUERY_COLUMNS.join(", ")}.`;
+    return { content: [{ type: "text", text }], isError: true };
+  }
+  const offset = input.offset ?? 0;
+  const limit = input.limit ?? DEFAULT_QUERY_LIMIT;
+  const matching = filterParts(stored.parts, input);
+  const full = partsTable(matching.slice(offset, offset + limit), true);
+  const idx = fields.map((f) => full.columns.indexOf(f));
+  const rows = full.rows.map((r) => idx.map((i) => r[i]));
+  const total = matching.length;
+  const value = {
+    result_id: input.result_id,
+    note: PRICING_DISCLAIMER,
+    total_matching: total,
+    offset,
+    next_offset: Math.max(total, 9999),
+    columns: fields,
+    rows
+  };
+  const fitted = fitToBudget(value, ["rows"], budget, QUERY_TRUNCATION_HINT);
+  if (isBudgetError(fitted)) return { content: [{ type: "text", text: toText(fitted) }], isError: true };
+  const end = offset + fitted.rows.length;
+  fitted.next_offset = end < total ? end : null;
+  return { content: [{ type: "text", text: toText(fitted) }] };
+}
+function registerQueryResultsTool(server, store = defaultResultStore) {
+  server.registerTool(
+    QUERY_RESULTS_TOOL_NAME,
+    {
+      title: "Query a stored Future Electronics BOM result",
+      description: QUERY_RESULTS_DESCRIPTION,
+      inputSchema: queryResultsInputShape,
+      annotations: { readOnlyHint: true, openWorldHint: false }
+    },
+    async (args) => queryResults(args, store)
+  );
+}
+
 // src/server.ts
 var SERVER_NAME = "future-electronics-mcp";
 var SERVER_VERSION = "0.1.0";
@@ -22953,6 +23123,7 @@ function registerTools(server, getClient = lazyClientProvider()) {
   registerLookupPartTool(server, getClient);
   registerLookupPartsTool(server, getClient);
   registerListBomFilesTool(server);
+  registerQueryResultsTool(server);
 }
 function createServer(getClient = lazyClientProvider()) {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });

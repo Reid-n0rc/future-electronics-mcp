@@ -9,6 +9,7 @@ import { FutureApiError, FutureClient, MAX_BATCH_PARTS } from "../../src/client.
 import { ConfigError } from "../../src/config.js";
 import { PRICING_DISCLAIMER } from "../../src/format.js";
 import { estimateTokens } from "../../src/output.js";
+import { ResultStore } from "../../src/results.js";
 import { createServer } from "../../src/server.js";
 import type { ClientProvider } from "../../src/tools/common.js";
 import {
@@ -708,7 +709,9 @@ describe("lookupParts parallel batches", () => {
   it("with maxConcurrency 1 matches the sequential (no maxConcurrency) output exactly", async () => {
     const names = [...partNames(650), "MISS-1", "x"];
     const one = gatedClient(1);
-    const doneOne = lookupParts({ parts: names }, one.getClient);
+    // Same result_id on both runs, so the outputs can be compared exactly.
+    const fixedStore = () => new ResultStore({ newId: () => "fixed-id" });
+    const doneOne = lookupParts({ parts: names }, one.getClient, undefined, fixedStore());
     for (let i = 0; i < 3; i++) {
       await flush();
       expect(one.stub.batchLookup).toHaveBeenCalledTimes(i + 1);
@@ -717,7 +720,7 @@ describe("lookupParts parallel batches", () => {
     const resOne = await doneOne;
     expect(one.state.peak).toBe(1);
 
-    const seq = await lookupParts({ parts: names }, providerFor(stubClient()));
+    const seq = await lookupParts({ parts: names }, providerFor(stubClient()), undefined, fixedStore());
     expect(resOne).toEqual(seq);
   });
 
@@ -1136,6 +1139,7 @@ describe("future_lookup_parts problems-first summary", () => {
     expect(Math.abs(big.text.length - small.text.length)).toBeLessThan(20);
     expect(big.text).not.toContain("\n");
     expect(big.json).toEqual({
+      result_id: expect.any(String),
       note: PRICING_DISCLAIMER,
       totals: {
         requested: 2000,

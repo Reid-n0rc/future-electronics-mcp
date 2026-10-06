@@ -92,47 +92,6 @@ templates are intake only, and filing one does not authorize work.
    pass.
 6. The maintainer merges the PR.
 
-## Agent workflow (GitHub App identity)
-
-Agents push branches and open PRs as the private GitHub App
-`future-electronics-mcp-agent`, not as the maintainer. The PR author is then
-`<app>[bot]`, so CODEOWNERS can request @Reid-n0rc's review and the ruleset
-requires his approval before merge. Commits still use the maintainer identity
-and stay SSH-signed:
-
-```bash
-git config user.email reid@malmoset.com
-```
-
-1. Mint a one-hour installation token. The script prints only the token, and
-   the App credentials come from the macOS Keychain (see SECURITY.md):
-   ```bash
-   export GH_TOKEN=$(node scripts/agent-token.mjs --from-keychain)
-   ```
-   On other systems, don't pass `--from-keychain`. Instead set
-   `FUTURE_AGENT_APP_ID`, `FUTURE_AGENT_INSTALLATION_ID`, and
-   `FUTURE_AGENT_PRIVATE_KEY` (PEM) or `FUTURE_AGENT_PRIVATE_KEY_B64` from a
-   secret manager.
-2. **Check that the token isn't empty** before using it:
-   `[ -n "$GH_TOKEN" ] || exit 1`. If `GH_TOKEN` is empty, `gh` silently falls
-   back to the maintainer's own login, and the PR is authored by the wrong
-   account. Then push through `gh`'s credential helper, so the token never
-   appears in a URL:
-   ```bash
-   git -c credential.helper= -c credential.helper='!gh auth git-credential' push -u origin <branch>
-   ```
-   **Never persist the token** in a git remote URL, git config, or a file, and
-   never echo or log it.
-3. Open the PR with `GH_TOKEN` still set, so `gh` acts as the App:
-   ```bash
-   gh pr create -R Reid-n0rc/future-electronics-mcp -B dev --head <branch> --reviewer Reid-n0rc --title "..." --body-file <file>
-   ```
-   Always pass `--reviewer Reid-n0rc`. CODEOWNERS didn't auto-request review
-   on App PRs in testing (#49).
-4. Assign the issue to @Reid-n0rc, the accountable human.
-5. When you're done, run `unset GH_TOKEN`. The token expires after one hour
-   anyway.
-
 ## Task sizing (context-window budget)
 
 Break every task up so that one agent session can finish it **without
