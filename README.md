@@ -459,11 +459,24 @@ when it sends one.
 `npm run live-check` makes one real `exact` lookup of part `292230-6` and prints
 the summarized result. It reads `FUTURE_API_KEY` from the environment, never
 prints it, and exits non-zero with a clear message when the key is missing or
-the call fails. It is not part of `npm test` or CI.
+the call fails. It is not part of `npm test`.
 
 ```bash
 FUTURE_API_KEY="…" npm run live-check
 ```
+
+GitHub Actions also runs it as the `live-check` job, but only for releases:
+
+- **Release PRs** (`dev` → `master`) from this repo, in `ci.yml`. It is a
+  required check, so a release PR cannot merge until it passes. PRs into `dev`
+  and fork PRs skip it.
+- **Published releases**, in `release.yml`. The `.mcpb` is attached only after
+  the check passes against the tagged commit.
+- **Manual runs**, by dispatching the `CI` workflow.
+
+The key comes from the `FUTURE_API_KEY` secret of the `live-api` GitHub
+Environment, which requires the maintainer's approval for each run. It is not a
+repository secret, so no other job can read it.
 
 ## Development
 

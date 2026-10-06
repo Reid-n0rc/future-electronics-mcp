@@ -124,16 +124,21 @@ exceeding the context window**. Rules of thumb:
    ```bash
    npm ci && npm run typecheck && npm run build && npm test
    ```
-   The maintainer also runs the opt-in live API check. If any part fails or is
-   skipped, there is no release.
+   The live API check (`npm run live-check`) must also pass. CI runs it as the
+   required `live-check` job on release PRs and again on the published release
+   (see README.md, "Live check"). The maintainer approves each run in the
+   `live-api` environment. If any part fails or is skipped, there is no
+   release.
 
 ## Release process
 
 1. Open a PR from `dev` to `master`, titled `Release vX.Y.Z`.
    The `mcpb/manifest.json` version must match `package.json` (and the tag),
-   or the release workflow fails and no `.mcpb` is attached.
+   or the release workflow fails and no `.mcpb` is attached. The `.mcpb` is
+   also withheld if the release workflow's `live-check` job fails.
 2. Paste the full regression output (see the Testing policy) into the PR. CI
-   must also be green.
+   must also be green, including `live-check`, which waits for the
+   maintainer's approval of the `live-api` environment.
 3. The maintainer reviews and merges the PR.
 4. Only the maintainer creates the tag and GitHub release, from `master`.
    Agents never tag or release.

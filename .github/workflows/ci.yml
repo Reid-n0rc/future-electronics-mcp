@@ -6,6 +6,11 @@
 #
 # No repository secrets are passed to the build jobs. Tests use mocked HTTP and
 # the dummy key `test-key`; they never need FUTURE_API_KEY.
+#
+# The one exception is the `live-check` job (issue #61). It runs only on
+# release PRs into master from this repo and on manual dispatch, and reads
+# FUTURE_API_KEY from the `live-api` environment secret, which requires the
+# maintainer's approval for each run. No other job can see that secret.
 name: CI
 
 on:
@@ -96,3 +101,32 @@ jobs:
           path: build/future-electronics-mcp.mcpb
           if-no-files-found: error
           retention-days: 14
+
+  live-check:
+    name: live-check
+    # Release PRs (into master) from this repo, or a manual run. Fork PRs and
+    # PRs into dev skip it, so the key is never exposed to untrusted code.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.base_ref == 'master' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: live-api
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      # One real lookup against the Future API (scripts/live-check.ts). The
+      # key is set on this step only and is never printed.
+      - name: Live API check
+        env:
+          FUTURE_API_KEY: ${{ secrets.FUTURE_API_KEY }}
+        run: npm run live-check
