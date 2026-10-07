@@ -1,6 +1,6 @@
 ---
-name: Task
-about: A unit of work with a software plan (requires maintainer approval before work starts)
+name: Implementation task
+about: Work to be implemented, with a software plan (maintainer approval required before work starts)
 labels: plan-needs-approval
 ---
 

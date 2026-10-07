@@ -1,0 +1,104 @@
+{
+  "lookup_value": "TEST-1234",
+  "lookup_type": "exact",
+  "lookup_results": "2 Offers found",
+  "offers": [
+    {
+      "_orbweaver_data": { "datasource_name": "Example Datasource" },
+      "part_id": {
+        "seller_part_number": "9999999",
+        "unit_weight": 0.52,
+        "web_url": "https://example.com/p/9999999",
+        "mpn": "TEST-1234"
+      },
+      "part_attributes": [
+        { "name": "quantity_minimum", "value": 1000 },
+        { "name": "web_view", "value": true },
+        { "name": "packageType", "value": "REEL" },
+        { "name": "mpq", "value": "1000" },
+        { "name": "CustomReelAvailable", "value": "0" },
+        { "name": "dateCode", "value": null },
+        { "name": "rohs", "value": "Y" },
+        { "name": "leadFree", "value": "Y" },
+        { "name": "ncnrFlag", "value": "N" },
+        { "name": "availableRegion", "value": "NA" },
+        { "name": "shippingRestriction", "value": null },
+        { "name": "countryRestriction", "value": null },
+        { "name": "productLifeCycle", "value": "Active" },
+        { "name": "eccn", "value": "EAR99" },
+        { "name": "description (en)", "value": "Test connector, 4 position, 2.54 mm pitch" },
+        { "name": "ATS_NA", "value": 12000 },
+        { "name": "ATS_EU", "value": 0 },
+        { "name": "PBO_NA", "value": 0 },
+        { "name": "manufacturerName", "value": "Example Components Inc." }
+      ],
+      "categories": [
+        { "id": "42", "name": "connectors", "subcategory_name": "board-to-board" }
+      ],
+      "documents": [
+        {
+          "type": "Datasheet",
+          "subtype": null,
+          "title": "TEST-1234 Datasheet",
+          "file_name": "test-1234.pdf",
+          "revision": null,
+          "format": "PDF",
+          "language": "EN",
+          "url": "https://example.com/docs/test-1234.pdf",
+          "publish_date": null,
+          "last_update": null
+        }
+      ],
+      "images": [
+        { "url": "https://example.com/img/test-1234.jpg", "type": "JPG" }
+      ],
+      "quantities": {
+        "quantity_available": 12000,
+        "quantity_factory": 0,
+        "quantity_minimum": 1000,
+        "quantity_committed": null,
+        "quantity_on_order": 5000,
+        "factory_leadtime": "12",
+        "factory_leadtime_units": "Weeks",
+        "order_mult_qty": 1000
+      },
+      "pricing": [
+        { "unit_price": 0.42, "quantity_from": 1000, "quantity_to": 4999 },
+        { "unit_price": 0.37, "quantity_from": 5000, "quantity_to": null }
+      ],
+      "people_and_places": { "buyer_address_id": null, "site": "NA" },
+      "pricing_type": "Preferred",
+      "currency": { "currency_code": "USD" },
+      "internal1": null
+    },
+    {
+      "_orbweaver_data": null,
+      "part_id": {
+        "seller_part_number": "9999998",
+        "buyer_part_number": null,
+        "unit_weight": null,
+        "web_url": null,
+        "mpn": "TEST-1234"
+      },
+      "part_attributes": [],
+      "categories": null,
+      "documents": null,
+      "images": [],
+      "quantities": {
+        "quantity_available": null,
+        "quantity_factory": null,
+        "quantity_minimum": null,
+        "quantity_committed": null,
+        "quantity_on_order": null,
+        "factory_leadtime": "CALL",
+        "factory_leadtime_units": null,
+        "order_mult_qty": null
+      },
+      "pricing": [],
+      "people_and_places": null,
+      "pricing_type": null,
+      "currency": null,
+      "internal1": null
+    }
+  ]
+}

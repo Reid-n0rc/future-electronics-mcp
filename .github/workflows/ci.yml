@@ -1,0 +1,144 @@
+# CI: build, typecheck, and test on every PR into dev/master, plus a secret scan.
+#
+# Release PRs (dev -> master) are covered by the pull_request trigger on
+# master: they run the full regression from a clean `npm ci`, as required by
+# the Testing policy in AGENTS.md.
+#
+# No repository secrets are passed to the build jobs. Tests use mocked HTTP and
+# the dummy key `test-key`; they never need FUTURE_API_KEY.
+#
+# The one exception is the `live-check` job (issue #61). It runs only on
+# release PRs into master from this repo and on manual dispatch, and reads
+# FUTURE_API_KEY from the `live-api` environment secret, which requires the
+# maintainer's approval for each run. No other job can see that secret.
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines is >=22.12 (vitest ^5 requires it; Node 18/20 are EOL).
+        node-version: [22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      # Full regression from a clean install (AGENTS.md, Testing policy).
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  hooks:
+    name: Hook tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Tests .githooks/pre-commit, .githooks/pre-push, and the Claude push
+      # guard in throwaway local repos (no network). On ubuntu `sh` is dash,
+      # so this also catches bash-isms in the POSIX hooks. jq is preinstalled.
+      - run: sh tests/hooks/run.sh
+
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks-action lists the PR's commits via the API
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # scan the full history, not just the tip
+      # Uses .gitleaks.toml at the repo root. This repo is on a personal
+      # account, so gitleaks-action needs no GITLEAKS_LICENSE. GITHUB_TOKEN is
+      # the built-in, read-only (contents: read) token used to read PR commits.
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bundle:
+    name: Bundle is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run bundle
+      # The committed server/ bundle must match a fresh build of src/. If this
+      # fails, run `npm run bundle` and commit the result.
+      - run: git diff --exit-code server/
+
+  mcpb:
+    name: Claude Desktop bundle (.mcpb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      # Validates mcpb/manifest.json with the pinned mcpb CLI and packs
+      # build/future-electronics-mcp.mcpb, so a broken manifest fails the PR.
+      - run: npm run pack:mcpb
+      # For manual testing: download it from the run's Artifacts section and
+      # open it in Claude Desktop. The artifact is a zip that contains the .mcpb.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: future-electronics-mcp-mcpb
+          path: build/future-electronics-mcp.mcpb
+          if-no-files-found: error
+          retention-days: 14
+
+  live-check:
+    name: live-check
+    # Release PRs (into master) from this repo, or a manual run. Fork PRs and
+    # PRs into dev skip it, so the key is never exposed to untrusted code.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.base_ref == 'master' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: live-api
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      # One real lookup against the Future API (scripts/live-check.ts). The
+      # key is set on this step only and is never printed.
+      - name: Live API check
+        env:
+          FUTURE_API_KEY: ${{ secrets.FUTURE_API_KEY }}
+        run: npm run live-check

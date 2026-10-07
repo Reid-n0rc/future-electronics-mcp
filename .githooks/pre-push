@@ -1,0 +1,29 @@
+#!/bin/sh
+# pre-push: refuse pushes that update refs/heads/master or refs/heads/dev.
+#
+# Server-side branch protection also enforces this. The hook is a local
+# convenience that fails fast before anything reaches GitHub. See AGENTS.md.
+#
+# Emergency bypass (maintainer only, e.g. a SECURITY.md key purge):
+#   ALLOW_PROTECTED_PUSH=1 git push ...
+#
+# Git feeds one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+
+if [ "${ALLOW_PROTECTED_PUSH:-}" = "1" ]; then
+    exit 0
+fi
+
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/master | refs/heads/dev)
+            echo "pre-push: refusing to push to ${remote_ref#refs/heads/}." >&2
+            echo "  master and dev change only through pull requests (see AGENTS.md)." >&2
+            echo "  Push an issue-<n>-<slug> branch and open a PR against dev instead." >&2
+            status=1
+            ;;
+    esac
+done
+
+exit $status

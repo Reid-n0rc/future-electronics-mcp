@@ -1,0 +1,37 @@
+{
+  "name": "future-electronics",
+  "displayName": "Future Electronics Part Lookup",
+  "description": "MCP server for the Future Electronics Product Information API: part, stock, lead time, and price-break lookup by manufacturer part number",
+  "version": "0.1.0",
+  "author": {
+    "name": "Reid Crowe"
+  },
+  "homepage": "https://github.com/Reid-n0rc/future-electronics-mcp#readme",
+  "repository": "https://github.com/Reid-n0rc/future-electronics-mcp",
+  "license": "AGPL-3.0-or-later",
+  "userConfig": {
+    "future_api_key": {
+      "type": "string",
+      "title": "Future Electronics API key",
+      "description": "Your Future Electronics license key (request one at https://www.futureelectronics.com/api-solutions). Claude Code stores it in secure storage, never in a settings file.",
+      "required": true,
+      "sensitive": true
+    },
+    "workspace_dir": {
+      "type": "directory",
+      "title": "Workspace folder",
+      "description": "Optional. The one folder where the server reads BOM files and writes exports; it never touches files outside it. Leave blank to use Documents/Future Electronics MCP in your home folder (or Future Electronics MCP in your home folder if there is no Documents folder).",
+      "required": false
+    }
+  },
+  "mcpServers": {
+    "future-electronics": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/future-electronics-mcp.mjs"],
+      "env": {
+        "FUTURE_API_KEY": "${user_config.future_api_key}",
+        "FUTURE_WORKSPACE_DIR": "${user_config.workspace_dir}"
+      }
+    }
+  }
+}
