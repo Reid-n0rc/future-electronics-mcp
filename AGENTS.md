@@ -66,7 +66,8 @@ git config core.hooksPath .githooks
   (`.claude/hooks/guard-git-push.sh`, needs `jq`). It denies agent pushes to
   `master` or `dev` and force pushes, except `--force-with-lease` on
   `issue-*` branches.
-- Hook tests: `sh tests/hooks/run.sh`.
+- Hook tests: `sh tests/hooks/run.sh`. CI runs them on every PR as the
+  `Hook tests` job.
 
 ## Issue lifecycle
 
@@ -122,7 +123,7 @@ exceeding the context window**. Rules of thumb:
 3. **Every release runs full regression, and it must pass.** Before a release,
    run the complete suite from a clean install:
    ```bash
-   npm ci && npm run typecheck && npm run build && npm test
+   npm ci && npm run typecheck && npm run build && npm test && sh tests/hooks/run.sh
    ```
    The live API check (`npm run live-check`) must also pass. CI runs it as the
    required `live-check` job on release PRs and again on the published release

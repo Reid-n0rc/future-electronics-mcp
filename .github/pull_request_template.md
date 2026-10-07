@@ -14,4 +14,4 @@ Closes #
 - [ ] No keys, tokens, or `.env` files included (see SECURITY.md)
 
 <!-- Release PRs (dev → master) only: -->
-- [ ] Release PR: full regression (`npm ci && npm run typecheck && npm run build && npm test`) passed, and output is attached
+- [ ] Release PR: full regression (`npm ci && npm run typecheck && npm run build && npm test && sh tests/hooks/run.sh`) passed, and output is attached
