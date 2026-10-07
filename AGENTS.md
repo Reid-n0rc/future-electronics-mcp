@@ -67,7 +67,7 @@ git config core.hooksPath .githooks
   `master` or `dev` and force pushes, except `--force-with-lease` on
   `issue-*` branches.
 - Hook tests: `sh tests/hooks/run.sh`. CI runs them on every PR as the
-  `Hook tests` job.
+  `Hook tests` job, a required check on `master` and `dev`.
 
 ## Issue lifecycle
 
