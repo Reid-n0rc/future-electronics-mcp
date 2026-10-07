@@ -30,7 +30,7 @@ concurrency:
 jobs:
   build:
     name: Build and test (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -50,11 +50,14 @@ jobs:
 
   hooks:
     name: Hook tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # TEMPORARY (issue #72): record tool availability on the Ubuntu 26 image.
+      - name: Image diagnostics
+        run: lsb_release -a; readlink -f /bin/sh; jq --version; gh --version; git --version
       # Tests .githooks/pre-commit, .githooks/pre-push, and the Claude push
       # guard in throwaway local repos (no network). On ubuntu `sh` is dash,
       # so this also catches bash-isms in the POSIX hooks. jq is preinstalled.
@@ -62,7 +65,7 @@ jobs:
 
   gitleaks:
     name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       pull-requests: read # gitleaks-action lists the PR's commits via the API
@@ -79,7 +82,7 @@ jobs:
 
   bundle:
     name: Bundle is up to date
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -94,7 +97,7 @@ jobs:
 
   mcpb:
     name: Claude Desktop bundle (.mcpb)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -123,7 +126,7 @@ jobs:
       (github.base_ref == 'master' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: live-api
     permissions:
       contents: read
