@@ -48,6 +48,18 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  hooks:
+    name: Hook tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Tests .githooks/pre-commit, .githooks/pre-push, and the Claude push
+      # guard in throwaway local repos (no network). On ubuntu `sh` is dash,
+      # so this also catches bash-isms in the POSIX hooks. jq is preinstalled.
+      - run: sh tests/hooks/run.sh
+
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
