@@ -37,6 +37,14 @@
     {
       "name": "future_lookup_parts",
       "description": "Look up many parts at once, such as a BOM, with the best offer and price for each."
+    },
+    {
+      "name": "future_query_results",
+      "description": "Filter and page through a saved BOM lookup result without calling the API again."
+    },
+    {
+      "name": "future_list_bom_files",
+      "description": "List the BOM files (.csv and .tsv) in the workspace folder, ready to look up."
     }
   ],
   "compatibility": {

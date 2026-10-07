@@ -4,8 +4,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it } from "vitest";
-import { SERVER_VERSION } from "../src/server.js";
+import { registerTools, SERVER_NAME, SERVER_VERSION } from "../src/server.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const read = (rel: string) => readFileSync(root + rel, "utf8");
@@ -125,10 +126,41 @@ describe("mcpb/manifest.json: user_config", () => {
   });
 });
 
+/** Names of the tools registerTools actually registers (issue #69). */
+function registeredToolNames(): string[] {
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const names: string[] = [];
+  const original = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+  (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool = (
+    ...args: unknown[]
+  ) => {
+    names.push(args[0] as string);
+    return original(...args);
+  };
+  // Dummy provider: registration must never build a client or need a key.
+  registerTools(server, () => {
+    throw new Error("client must not be created during registration");
+  });
+  return names;
+}
+
 describe("mcpb/manifest.json: tools", () => {
-  it("lists both tools the server registers, with short descriptions", () => {
-    const names = (manifest.tools ?? []).map((t) => t.name).sort();
-    expect(names).toEqual(["future_lookup_part", "future_lookup_parts"]);
+  it("registerTools registers at least the four known tools", () => {
+    const names = registeredToolNames();
+    expect(names.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(names).size).toBe(names.length);
+    for (const name of ["future_lookup_part", "future_lookup_parts", "future_query_results", "future_list_bom_files"]) {
+      expect(names).toContain(name);
+    }
+  });
+
+  it("lists exactly the tools the server registers (none missing, none extra)", () => {
+    const manifestNames = (manifest.tools ?? []).map((t) => t.name);
+    expect(new Set(manifestNames).size).toBe(manifestNames.length);
+    expect([...manifestNames].sort()).toEqual(registeredToolNames().sort());
+  });
+
+  it("gives every tool a short description and ships it in the bundle", () => {
     const bundle = read(manifest.server.entry_point);
     for (const tool of manifest.tools ?? []) {
       expect(bundle).toContain(`"${tool.name}"`);
