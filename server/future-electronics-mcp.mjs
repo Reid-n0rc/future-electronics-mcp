@@ -68,9 +68,9 @@ var require_code = __commonJS({
     };
     exports.Name = Name;
     var _Code = class extends _CodeOrName {
-      constructor(code2) {
+      constructor(code3) {
         super();
-        this._items = typeof code2 === "string" ? [code2] : code2;
+        this._items = typeof code3 === "string" ? [code3] : code3;
       }
       toString() {
         return this.str;
@@ -97,13 +97,13 @@ var require_code = __commonJS({
     exports._Code = _Code;
     exports.nil = new _Code("");
     function _(strs, ...args) {
-      const code2 = [strs[0]];
+      const code3 = [strs[0]];
       let i = 0;
       while (i < args.length) {
-        addCodeArg(code2, args[i]);
-        code2.push(strs[++i]);
+        addCodeArg(code3, args[i]);
+        code3.push(strs[++i]);
       }
-      return new _Code(code2);
+      return new _Code(code3);
     }
     exports._ = _;
     var plus = new _Code("+");
@@ -119,13 +119,13 @@ var require_code = __commonJS({
       return new _Code(expr);
     }
     exports.str = str2;
-    function addCodeArg(code2, arg) {
+    function addCodeArg(code3, arg) {
       if (arg instanceof _Code)
-        code2.push(...arg._items);
+        code3.push(...arg._items);
       else if (arg instanceof Name)
-        code2.push(arg);
+        code3.push(arg);
       else
-        code2.push(interpolate(arg));
+        code3.push(interpolate(arg));
     }
     exports.addCodeArg = addCodeArg;
     function optimize(expr) {
@@ -309,7 +309,7 @@ var require_scope = __commonJS({
         }, usedValues, getCode);
       }
       _reduceValues(values, valueCode, usedValues = {}, getCode) {
-        let code2 = code_1.nil;
+        let code3 = code_1.nil;
         for (const prefix in values) {
           const vs = values[prefix];
           if (!vs)
@@ -322,16 +322,16 @@ var require_scope = __commonJS({
             let c = valueCode(name);
             if (c) {
               const def = this.opts.es5 ? exports.varKinds.var : exports.varKinds.const;
-              code2 = (0, code_1._)`${code2}${def} ${name} = ${c};${this.opts._n}`;
+              code3 = (0, code_1._)`${code3}${def} ${name} = ${c};${this.opts._n}`;
             } else if (c = getCode === null || getCode === void 0 ? void 0 : getCode(name)) {
-              code2 = (0, code_1._)`${code2}${c}${this.opts._n}`;
+              code3 = (0, code_1._)`${code3}${c}${this.opts._n}`;
             } else {
               throw new ValueError(name);
             }
             nameSet.set(name, UsedValueState.Completed);
           });
         }
-        return code2;
+        return code3;
       }
     };
     exports.ValueScope = ValueScope;
@@ -491,9 +491,9 @@ var require_codegen = __commonJS({
       }
     };
     var AnyCode = class extends Node {
-      constructor(code2) {
+      constructor(code3) {
         super();
-        this.code = code2;
+        this.code = code3;
       }
       render({ _n }) {
         return `${this.code};` + _n;
@@ -515,7 +515,7 @@ var require_codegen = __commonJS({
         this.nodes = nodes;
       }
       render(opts) {
-        return this.nodes.reduce((code2, n) => code2 + n.render(opts), "");
+        return this.nodes.reduce((code3, n) => code3 + n.render(opts), "");
       }
       optimizeNodes() {
         const { nodes } = this;
@@ -563,10 +563,10 @@ var require_codegen = __commonJS({
         this.condition = condition;
       }
       render(opts) {
-        let code2 = `if(${this.condition})` + super.render(opts);
+        let code3 = `if(${this.condition})` + super.render(opts);
         if (this.else)
-          code2 += "else " + this.else.render(opts);
-        return code2;
+          code3 += "else " + this.else.render(opts);
+        return code3;
       }
       optimizeNodes() {
         super.optimizeNodes();
@@ -687,12 +687,12 @@ var require_codegen = __commonJS({
     Return.kind = "return";
     var Try = class extends BlockNode {
       render(opts) {
-        let code2 = "try" + super.render(opts);
+        let code3 = "try" + super.render(opts);
         if (this.catch)
-          code2 += this.catch.render(opts);
+          code3 += this.catch.render(opts);
         if (this.finally)
-          code2 += this.finally.render(opts);
-        return code2;
+          code3 += this.finally.render(opts);
+        return code3;
       }
       optimizeNodes() {
         var _a, _b;
@@ -809,18 +809,18 @@ var require_codegen = __commonJS({
       }
       // returns code for object literal for the passed argument list of key-value pairs
       object(...keyValues) {
-        const code2 = ["{"];
+        const code3 = ["{"];
         for (const [key, value] of keyValues) {
-          if (code2.length > 1)
-            code2.push(",");
-          code2.push(key);
+          if (code3.length > 1)
+            code3.push(",");
+          code3.push(key);
           if (key !== value || this.opts.es5) {
-            code2.push(":");
-            (0, code_1.addCodeArg)(code2, value);
+            code3.push(":");
+            (0, code_1.addCodeArg)(code3, value);
           }
         }
-        code2.push("}");
-        return new code_1._Code(code2);
+        code3.push("}");
+        return new code_1._Code(code3);
       }
       // `if` clause (or statement if `thenBody` and, optionally, `elseBody` are passed)
       if(condition, thenBody, elseBody) {
@@ -3139,22 +3139,22 @@ var require_utils = __commonJS({
     }
     function stringArrayToHexStripped(input) {
       let acc = "";
-      let code2 = 0;
+      let code3 = 0;
       let i = 0;
       for (i = 0; i < input.length; i++) {
-        code2 = input[i].charCodeAt(0);
-        if (code2 === 48) {
+        code3 = input[i].charCodeAt(0);
+        if (code3 === 48) {
           continue;
         }
-        if (!(code2 >= 48 && code2 <= 57 || code2 >= 65 && code2 <= 70 || code2 >= 97 && code2 <= 102)) {
+        if (!(code3 >= 48 && code3 <= 57 || code3 >= 65 && code3 <= 70 || code3 >= 97 && code3 <= 102)) {
           return "";
         }
         acc += input[i];
         break;
       }
       for (i += 1; i < input.length; i++) {
-        code2 = input[i].charCodeAt(0);
-        if (!(code2 >= 48 && code2 <= 57 || code2 >= 65 && code2 <= 70 || code2 >= 97 && code2 <= 102)) {
+        code3 = input[i].charCodeAt(0);
+        if (!(code3 >= 48 && code3 <= 57 || code3 >= 65 && code3 <= 70 || code3 >= 97 && code3 <= 102)) {
           return "";
         }
         acc += input[i];
@@ -3396,15 +3396,15 @@ var require_utils = __commonJS({
         if (isPathCharacter(ch)) {
           output += ch;
         } else {
-          const code2 = input.charCodeAt(i);
-          if (code2 < 128) {
-            output += isEscapeSafe(code2) ? ch : BYTE_HEX[code2];
-          } else if (code2 < 55296 || code2 > 57343) {
-            output += percentEncodeNonAscii(code2);
-          } else if (code2 <= 56319 && i + 1 < input.length) {
+          const code3 = input.charCodeAt(i);
+          if (code3 < 128) {
+            output += isEscapeSafe(code3) ? ch : BYTE_HEX[code3];
+          } else if (code3 < 55296 || code3 > 57343) {
+            output += percentEncodeNonAscii(code3);
+          } else if (code3 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code3 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3435,15 +3435,15 @@ var require_utils = __commonJS({
         if (isPathCharacter(ch) && (ch !== ":" || !firstSegment)) {
           output += ch;
         } else {
-          const code2 = input.charCodeAt(i);
-          if (code2 < 128) {
-            output += BYTE_HEX[code2];
-          } else if (code2 < 55296 || code2 > 57343) {
-            output += percentEncodeNonAscii(code2);
-          } else if (code2 <= 56319 && i + 1 < input.length) {
+          const code3 = input.charCodeAt(i);
+          if (code3 < 128) {
+            output += BYTE_HEX[code3];
+          } else if (code3 < 55296 || code3 > 57343) {
+            output += percentEncodeNonAscii(code3);
+          } else if (code3 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code3 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3470,15 +3470,15 @@ var require_utils = __commonJS({
         if (isAllowed(ch)) {
           output += ch;
         } else {
-          const code2 = input.charCodeAt(i);
-          if (code2 < 128) {
-            output += BYTE_HEX[code2];
-          } else if (code2 < 55296 || code2 > 57343) {
-            output += percentEncodeNonAscii(code2);
-          } else if (code2 <= 56319 && i + 1 < input.length) {
+          const code3 = input.charCodeAt(i);
+          if (code3 < 128) {
+            output += BYTE_HEX[code3];
+          } else if (code3 < 55296 || code3 > 57343) {
+            output += percentEncodeNonAscii(code3);
+          } else if (code3 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code3 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -3523,15 +3523,15 @@ var require_utils = __commonJS({
         if (isQueryFragmentCharacter(ch)) {
           output += ch;
         } else {
-          const code2 = input.charCodeAt(i);
-          if (code2 < 128) {
-            output += isEscapeSafe(code2) ? ch : BYTE_HEX[code2];
-          } else if (code2 < 55296 || code2 > 57343) {
-            output += percentEncodeNonAscii(code2);
-          } else if (code2 <= 56319 && i + 1 < input.length) {
+          const code3 = input.charCodeAt(i);
+          if (code3 < 128) {
+            output += isEscapeSafe(code3) ? ch : BYTE_HEX[code3];
+          } else if (code3 < 55296 || code3 > 57343) {
+            output += percentEncodeNonAscii(code3);
+          } else if (code3 <= 56319 && i + 1 < input.length) {
             const low = input.charCodeAt(i + 1);
             if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code2 - 55296 << 10) + (low - 56320));
+              output += percentEncodeNonAscii(65536 + (code3 - 55296 << 10) + (low - 56320));
               i++;
             } else {
               output += percentEncodeNonAscii(65533);
@@ -6464,8 +6464,8 @@ var require_format = __commonJS({
             }
           }
           function getFormat(fmtDef) {
-            const code2 = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema)}` : void 0;
-            const fmt = gen.scopeValue("formats", { key: schema, ref: fmtDef, code: code2 });
+            const code3 = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema)}` : void 0;
+            const fmt = gen.scopeValue("formats", { key: schema, ref: fmtDef, code: code3 });
             if (typeof fmtDef == "object" && !(fmtDef instanceof RegExp)) {
               return [fmtDef.type || "string", fmtDef.validate, (0, codegen_1._)`${fmt}.validate`];
             }
@@ -13207,23 +13207,23 @@ var ServerResultSchema = union([
   CreateTaskResultSchema
 ]);
 var McpError = class _McpError extends Error {
-  constructor(code2, message, data) {
-    super(`MCP error ${code2}: ${message}`);
-    this.code = code2;
+  constructor(code3, message, data) {
+    super(`MCP error ${code3}: ${message}`);
+    this.code = code3;
     this.data = data;
     this.name = "McpError";
   }
   /**
    * Factory method to create the appropriate error type based on the error code and data
    */
-  static fromError(code2, message, data) {
-    if (code2 === ErrorCode.UrlElicitationRequired && data) {
+  static fromError(code3, message, data) {
+    if (code3 === ErrorCode.UrlElicitationRequired && data) {
       const errorData = data;
       if (errorData.elicitations) {
         return new UrlElicitationRequiredError(errorData.elicitations, message);
       }
     }
-    return new _McpError(code2, message, data);
+    return new _McpError(code3, message, data);
   }
 };
 var UrlElicitationRequiredError = class extends McpError {
@@ -22013,6 +22013,9 @@ function errorResult(error2) {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+// src/export.ts
+import { mkdir as mkdir2, writeFile } from "node:fs/promises";
+
 // src/format.ts
 var PRICING_DISCLAIMER = "Pricing is not an official quote. Confirm price and availability with Future Electronics before ordering.";
 var KEY_ATTRIBUTES = [
@@ -22124,143 +22127,6 @@ function priceAt(offer, qty) {
   return match ? { price_break: match } : { price_break: null, reason: "no_matching_break" };
 }
 
-// src/output.ts
-var BUDGET_EXCEEDED = "output_budget_exceeded";
-function toText(value) {
-  return JSON.stringify(value);
-}
-function budgetChars(maxTokens) {
-  return Math.floor(maxTokens * 4);
-}
-var isRecord = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-function getAt(obj, path) {
-  let cur = obj;
-  for (const key of path) cur = isRecord(cur) ? cur[key] : void 0;
-  return cur;
-}
-function setAt(obj, path, value) {
-  const [head, ...rest] = path;
-  const child = obj[head];
-  return {
-    ...obj,
-    [head]: rest.length === 0 ? value : setAt(isRecord(child) ? child : {}, rest, value)
-  };
-}
-function fitToBudget(value, fields, maxTokens, hint = "Some rows were omitted to stay within the output budget.") {
-  const limit = budgetChars(maxTokens);
-  if (toText(value).length <= limit) return value;
-  const paths = fields.map((f) => f.split("."));
-  const arrays = paths.map((p) => {
-    const a = getAt(value, p);
-    return Array.isArray(a) ? a : void 0;
-  });
-  const total = arrays.reduce((n, a) => n + (a?.length ?? 0), 0);
-  const build = (omit2) => {
-    let out = value;
-    let left = omit2;
-    for (let i = paths.length - 1; i >= 0; i--) {
-      const a = arrays[i];
-      if (!a) continue;
-      const drop = Math.min(left, a.length);
-      left -= drop;
-      out = setAt(out, paths[i], a.slice(0, a.length - drop));
-    }
-    return { ...out, truncated: { omitted: omit2, hint } };
-  };
-  const fits = (omit2) => toText(build(omit2)).length <= limit;
-  if (!fits(total)) {
-    return {
-      error: BUDGET_EXCEEDED,
-      message: `The result exceeds the output budget of ${maxTokens} tokens even with every list emptied. Narrow the request or raise FUTURE_MAX_OUTPUT_TOKENS.`
-    };
-  }
-  let lo = 0;
-  let hi = total;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (fits(mid)) hi = mid;
-    else lo = mid + 1;
-  }
-  return build(lo);
-}
-function isBudgetError(value) {
-  return isRecord(value) && value.error === BUDGET_EXCEEDED && Object.keys(value).length === 2;
-}
-function budgetedResult(value, fields, maxTokens, hint) {
-  const fitted = fitToBudget(value, fields, maxTokens, hint);
-  const result = { content: [{ type: "text", text: toText(fitted) }] };
-  if (isBudgetError(fitted)) result.isError = true;
-  return result;
-}
-
-// src/tools/lookupPart.ts
-var LOOKUP_PART_TOOL_NAME = "future_lookup_part";
-var DEFAULT_MAX_OFFERS = 10;
-var MAX_MAX_OFFERS = 50;
-var OFFERS_TRUNCATION_HINT = "Offers were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Lower max_offers, use lookup_type exact, or raise FUTURE_MAX_OUTPUT_TOKENS.";
-var LOOKUP_PART_DESCRIPTION = [
-  "Look up one electronic component in the Future Electronics catalog by manufacturer part number (MPN).",
-  "Returns a compact JSON summary: lookup_value, lookup_results, total_offers (offers found before truncation), and up to max_offers offers.",
-  "Each offer lists MPN, Future part number, product URL, stock (quantity_available, quantity_on_order), minimum and order multiple, lead time, currency, price breaks, package type, MPQ, RoHS, date code, and datasheet URL when known.",
-  "When quantity is given, each offer also has price_at_quantity: the price break that applies to that quantity, or a reason there is none (below_minimum, no_pricing, no_matching_break).",
-  `Pricing matches the Future website and is NOT an official quote: ${PRICING_DISCLAIMER}`,
-  "lookup_type defaults to exact, which matches the full part number. Use starts_with when you know only the beginning of the MPN (for example a base part without its packaging or temperature suffix), and contains when you know a fragment from the middle. Those return more, less precise offers, so check the mpn of each result.",
-  "Set raw to true only when you need upstream fields the summary omits; it returns the untouched API response (offers still truncated to max_offers) and ignores quantity.",
-  "Output is compact JSON capped at FUTURE_MAX_OUTPUT_TOKENS: if offers must be dropped to fit, the last ones go and truncated {omitted, hint} says how many.",
-  "For many parts at once, use future_lookup_parts instead."
-].join(" ");
-var lookupPartInputShape = {
-  part_number: external_exports.string().min(3).describe("Manufacturer part number, at least 3 alphanumeric characters."),
-  lookup_type: LookupTypeSchema.default("exact").describe(
-    "Match mode: exact (default), starts_with, contains, or default (the API's own default)."
-  ),
-  quantity: external_exports.number().int().positive().optional().describe("Optional order quantity; reports the applicable price break per offer."),
-  max_offers: external_exports.number().int().min(1).max(MAX_MAX_OFFERS).default(DEFAULT_MAX_OFFERS).describe(`Maximum offers to return, 1-${MAX_MAX_OFFERS} (default ${DEFAULT_MAX_OFFERS}).`),
-  raw: external_exports.boolean().default(false).describe("Return the untouched upstream response instead of the summary.")
-};
-var LookupPartInputSchema = external_exports.object(lookupPartInputShape);
-var rawOffers = (resp) => Array.isArray(resp?.offers) ? resp.offers : [];
-function buildLookupPartResult(resp, input) {
-  const all = rawOffers(resp);
-  const kept = all.slice(0, input.max_offers);
-  if (input.raw) {
-    return Array.isArray(resp?.offers) ? { ...resp, offers: kept } : resp;
-  }
-  const summary = summarizeLookup({ ...resp, offers: kept });
-  const { offers, ...rest } = summary;
-  const result = { ...rest, total_offers: all.length, offers };
-  if (input.quantity !== void 0) {
-    const qty = input.quantity;
-    result.quantity = qty;
-    result.offers = offers.map((offer, i) => ({
-      ...offer,
-      price_at_quantity: priceAt(kept[i], qty)
-    }));
-  }
-  return result;
-}
-function registerLookupPartTool(server, getClient) {
-  server.registerTool(
-    LOOKUP_PART_TOOL_NAME,
-    {
-      title: "Future Electronics part lookup",
-      description: LOOKUP_PART_DESCRIPTION,
-      inputSchema: lookupPartInputShape,
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async (input) => {
-      try {
-        const budget = loadMaxOutputTokens();
-        const resp = await getClient().lookup(input.part_number, input.lookup_type);
-        const value = buildLookupPartResult(resp, input);
-        return budgetedResult(value, ["offers"], budget, OFFERS_TRUNCATION_HINT);
-      } catch (error2) {
-        return errorResult(error2);
-      }
-    }
-  );
-}
-
 // src/bomFile.ts
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
@@ -22341,6 +22207,18 @@ async function resolveInWorkspace(name, root = loadWorkspaceDir()) {
   }
   if (realTarget === realRoot || !isWithin(realRoot, realTarget)) throw outside();
   return realTarget;
+}
+async function ensureWorkspace(root = loadWorkspaceDir()) {
+  try {
+    await mkdir(root, { recursive: true, mode: 448 });
+    const real = await realpath(root);
+    if (!(await stat(real)).isDirectory()) throw Object.assign(new Error(), { code: "ENOTDIR" });
+    return real;
+  } catch (error2) {
+    throw new WorkspaceError(
+      `Cannot create or open the workspace folder (${code(error2) ?? "error"}). Check FUTURE_WORKSPACE_DIR.`
+    );
+  }
 }
 async function listFiles(ext, root = loadWorkspaceDir()) {
   const wanted = (ext === void 0 ? [] : [ext].flat()).map(
@@ -22482,11 +22360,11 @@ async function readBomText(name, root) {
   try {
     fh = await open(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   } catch (error2) {
-    const code2 = error2.code;
-    if (code2 === "ENOENT") {
+    const code3 = error2.code;
+    if (code3 === "ENOENT") {
       throw new BomFileError(`${shown} was not found in the workspace folder. Use future_list_bom_files to see the files there.`);
     }
-    throw new BomFileError(`Cannot open ${shown} (${code2 ?? "error"}).`);
+    throw new BomFileError(`Cannot open ${shown} (${code3 ?? "error"}).`);
   }
   try {
     const st = await fh.stat();
@@ -22538,6 +22416,75 @@ async function loadBomFile(spec, root = loadWorkspaceDir()) {
     quantity_column: qtyIdx === void 0 ? null : label(qtyIdx)
   };
   return { rows, source };
+}
+
+// src/output.ts
+var BUDGET_EXCEEDED = "output_budget_exceeded";
+function toText(value) {
+  return JSON.stringify(value);
+}
+function budgetChars(maxTokens) {
+  return Math.floor(maxTokens * 4);
+}
+var isRecord = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+function getAt(obj, path) {
+  let cur = obj;
+  for (const key of path) cur = isRecord(cur) ? cur[key] : void 0;
+  return cur;
+}
+function setAt(obj, path, value) {
+  const [head, ...rest] = path;
+  const child = obj[head];
+  return {
+    ...obj,
+    [head]: rest.length === 0 ? value : setAt(isRecord(child) ? child : {}, rest, value)
+  };
+}
+function fitToBudget(value, fields, maxTokens, hint = "Some rows were omitted to stay within the output budget.") {
+  const limit = budgetChars(maxTokens);
+  if (toText(value).length <= limit) return value;
+  const paths = fields.map((f) => f.split("."));
+  const arrays = paths.map((p) => {
+    const a = getAt(value, p);
+    return Array.isArray(a) ? a : void 0;
+  });
+  const total = arrays.reduce((n, a) => n + (a?.length ?? 0), 0);
+  const build = (omit2) => {
+    let out = value;
+    let left = omit2;
+    for (let i = paths.length - 1; i >= 0; i--) {
+      const a = arrays[i];
+      if (!a) continue;
+      const drop = Math.min(left, a.length);
+      left -= drop;
+      out = setAt(out, paths[i], a.slice(0, a.length - drop));
+    }
+    return { ...out, truncated: { omitted: omit2, hint } };
+  };
+  const fits = (omit2) => toText(build(omit2)).length <= limit;
+  if (!fits(total)) {
+    return {
+      error: BUDGET_EXCEEDED,
+      message: `The result exceeds the output budget of ${maxTokens} tokens even with every list emptied. Narrow the request or raise FUTURE_MAX_OUTPUT_TOKENS.`
+    };
+  }
+  let lo = 0;
+  let hi = total;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (fits(mid)) hi = mid;
+    else lo = mid + 1;
+  }
+  return build(lo);
+}
+function isBudgetError(value) {
+  return isRecord(value) && value.error === BUDGET_EXCEEDED && Object.keys(value).length === 2;
+}
+function budgetedResult(value, fields, maxTokens, hint) {
+  const fitted = fitToBudget(value, fields, maxTokens, hint);
+  const result = { content: [{ type: "text", text: toText(fitted) }] };
+  if (isBudgetError(fitted)) result.isError = true;
+  return result;
 }
 
 // src/results.ts
@@ -22972,6 +22919,173 @@ function registerLookupPartsTool(server, getClient) {
   );
 }
 
+// src/export.ts
+var EXPORTS_DIR = "exports";
+var FORMULA_PREFIX = /^[=+\-@\t\r]/;
+function csvCell(value) {
+  if (value === null || value === void 0) return "";
+  let text = String(value);
+  if (typeof value === "string" && FORMULA_PREFIX.test(text)) text = `'${text}`;
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+function toCsv(stored) {
+  const table = partsTable(stored.parts, true);
+  const lines = [table.columns, ...table.rows].map((row) => row.map(csvCell).join(","));
+  return lines.map((line) => `${line}\r
+`).join("");
+}
+function toJson(resultId, stored) {
+  return `${JSON.stringify({ result_id: resultId, note: PRICING_DISCLAIMER, ...stored }, null, 2)}
+`;
+}
+function exportTimestamp(date3) {
+  const iso = date3.toISOString();
+  return `${iso.slice(0, 10).replace(/-/g, "")}-${iso.slice(11, 19).replace(/:/g, "")}`;
+}
+function exportFileName(resultId, format, date3, n = 1) {
+  const id = resultId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "result";
+  return `${exportTimestamp(date3)}-${id}${n > 1 ? `-${n}` : ""}.${format}`;
+}
+function code2(error2) {
+  return error2?.code ?? "error";
+}
+var MAX_NAME_ATTEMPTS = 100;
+async function writeExport(resultId, stored, format, options = {}) {
+  const root = await ensureWorkspace(options.root ?? loadWorkspaceDir());
+  const date3 = (options.now ?? (() => /* @__PURE__ */ new Date()))();
+  const content = format === "csv" ? toCsv(stored) : toJson(resultId, stored);
+  try {
+    await mkdir2(await resolveInWorkspace(EXPORTS_DIR, root), { recursive: true, mode: 448 });
+  } catch (error2) {
+    if (error2 instanceof WorkspaceError) throw error2;
+    throw new WorkspaceError(`Cannot create the ${EXPORTS_DIR} folder (${code2(error2)}).`);
+  }
+  for (let n = 1; n <= MAX_NAME_ATTEMPTS; n++) {
+    const path = `${EXPORTS_DIR}/${exportFileName(resultId, format, date3, n)}`;
+    try {
+      await writeFile(await resolveInWorkspace(path, root), content, { flag: "wx", mode: 384 });
+    } catch (error2) {
+      if (error2 instanceof WorkspaceError) throw error2;
+      if (code2(error2) === "EEXIST") continue;
+      throw new WorkspaceError(`Cannot write ${JSON.stringify(path)} (${code2(error2)}).`);
+    }
+    return { format, path, rows: stored.parts.length, bytes: Buffer.byteLength(content) };
+  }
+  throw new WorkspaceError(`Too many exports named like ${JSON.stringify(exportFileName(resultId, format, date3))}.`);
+}
+
+// src/tools/exportResults.ts
+var EXPORT_RESULTS_TOOL_NAME = "future_export_results";
+var EXPORT_FORMATS = ["csv", "json", "both"];
+var exportResultsInputShape = {
+  result_id: external_exports.string().min(1).describe("The result_id returned by future_lookup_parts."),
+  format: external_exports.enum(EXPORT_FORMATS, {
+    errorMap: () => ({ message: `Unknown format. Valid formats: ${EXPORT_FORMATS.join(", ")}.` })
+  }).default("csv").describe('"csv" (default), "json", or "both".')
+};
+var EXPORT_RESULTS_DESCRIPTION = `Save a stored future_lookup_parts result to the workspace folder, without calling the Future API again. format: "csv" (default; the future_query_results columns, one row per part), "json" (the full result, raw upstream batches included), or "both". Files go to ${EXPORTS_DIR}/<YYYYMMDD-HHMMSS>-<result_id>.csv|json (UTC time) and are never overwritten. Returns each file's workspace-relative path, rows and bytes. Results expire 60 minutes after last use.`;
+async function exportResults(input, store = defaultResultStore, options = {}) {
+  const fail = (text) => ({ content: [{ type: "text", text }], isError: true });
+  const stored = store.get(input.result_id);
+  if (!stored) return fail(unknownResultMessage(input.result_id));
+  const format = input.format ?? "csv";
+  const formats = format === "both" ? ["csv", "json"] : [format];
+  const files = [];
+  try {
+    for (const f of formats) files.push(await writeExport(input.result_id, stored, f, options));
+  } catch (error2) {
+    if (error2 instanceof WorkspaceError || error2 instanceof ConfigError) return fail(error2.message);
+    return fail("Unexpected error while writing the export.");
+  }
+  const value = { result_id: input.result_id, note: PRICING_DISCLAIMER, files };
+  return { content: [{ type: "text", text: toText(value) }] };
+}
+function registerExportResultsTool(server, store = defaultResultStore) {
+  server.registerTool(
+    EXPORT_RESULTS_TOOL_NAME,
+    {
+      title: "Export a stored Future Electronics BOM result",
+      description: EXPORT_RESULTS_DESCRIPTION,
+      inputSchema: exportResultsInputShape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    async (args) => exportResults(args, store)
+  );
+}
+
+// src/tools/lookupPart.ts
+var LOOKUP_PART_TOOL_NAME = "future_lookup_part";
+var DEFAULT_MAX_OFFERS = 10;
+var MAX_MAX_OFFERS = 50;
+var OFFERS_TRUNCATION_HINT = "Offers were dropped from the end to fit FUTURE_MAX_OUTPUT_TOKENS. Lower max_offers, use lookup_type exact, or raise FUTURE_MAX_OUTPUT_TOKENS.";
+var LOOKUP_PART_DESCRIPTION = [
+  "Look up one electronic component in the Future Electronics catalog by manufacturer part number (MPN).",
+  "Returns a compact JSON summary: lookup_value, lookup_results, total_offers (offers found before truncation), and up to max_offers offers.",
+  "Each offer lists MPN, Future part number, product URL, stock (quantity_available, quantity_on_order), minimum and order multiple, lead time, currency, price breaks, package type, MPQ, RoHS, date code, and datasheet URL when known.",
+  "When quantity is given, each offer also has price_at_quantity: the price break that applies to that quantity, or a reason there is none (below_minimum, no_pricing, no_matching_break).",
+  `Pricing matches the Future website and is NOT an official quote: ${PRICING_DISCLAIMER}`,
+  "lookup_type defaults to exact, which matches the full part number. Use starts_with when you know only the beginning of the MPN (for example a base part without its packaging or temperature suffix), and contains when you know a fragment from the middle. Those return more, less precise offers, so check the mpn of each result.",
+  "Set raw to true only when you need upstream fields the summary omits; it returns the untouched API response (offers still truncated to max_offers) and ignores quantity.",
+  "Output is compact JSON capped at FUTURE_MAX_OUTPUT_TOKENS: if offers must be dropped to fit, the last ones go and truncated {omitted, hint} says how many.",
+  "For many parts at once, use future_lookup_parts instead."
+].join(" ");
+var lookupPartInputShape = {
+  part_number: external_exports.string().min(3).describe("Manufacturer part number, at least 3 alphanumeric characters."),
+  lookup_type: LookupTypeSchema.default("exact").describe(
+    "Match mode: exact (default), starts_with, contains, or default (the API's own default)."
+  ),
+  quantity: external_exports.number().int().positive().optional().describe("Optional order quantity; reports the applicable price break per offer."),
+  max_offers: external_exports.number().int().min(1).max(MAX_MAX_OFFERS).default(DEFAULT_MAX_OFFERS).describe(`Maximum offers to return, 1-${MAX_MAX_OFFERS} (default ${DEFAULT_MAX_OFFERS}).`),
+  raw: external_exports.boolean().default(false).describe("Return the untouched upstream response instead of the summary.")
+};
+var LookupPartInputSchema = external_exports.object(lookupPartInputShape);
+var rawOffers = (resp) => Array.isArray(resp?.offers) ? resp.offers : [];
+function buildLookupPartResult(resp, input) {
+  const all = rawOffers(resp);
+  const kept = all.slice(0, input.max_offers);
+  if (input.raw) {
+    return Array.isArray(resp?.offers) ? { ...resp, offers: kept } : resp;
+  }
+  const summary = summarizeLookup({ ...resp, offers: kept });
+  const { offers, ...rest } = summary;
+  const result = { ...rest, total_offers: all.length, offers };
+  if (input.quantity !== void 0) {
+    const qty = input.quantity;
+    result.quantity = qty;
+    result.offers = offers.map((offer, i) => ({
+      ...offer,
+      price_at_quantity: priceAt(kept[i], qty)
+    }));
+  }
+  return result;
+}
+function registerLookupPartTool(server, getClient) {
+  server.registerTool(
+    LOOKUP_PART_TOOL_NAME,
+    {
+      title: "Future Electronics part lookup",
+      description: LOOKUP_PART_DESCRIPTION,
+      inputSchema: lookupPartInputShape,
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async (input) => {
+      try {
+        const budget = loadMaxOutputTokens();
+        const resp = await getClient().lookup(input.part_number, input.lookup_type);
+        const value = buildLookupPartResult(resp, input);
+        return budgetedResult(value, ["offers"], budget, OFFERS_TRUNCATION_HINT);
+      } catch (error2) {
+        return errorResult(error2);
+      }
+    }
+  );
+}
+
 // src/tools/listBomFiles.ts
 import { stat as stat2 } from "node:fs/promises";
 var LIST_BOM_FILES_TOOL_NAME = "future_list_bom_files";
@@ -23124,6 +23238,7 @@ function registerTools(server, getClient = lazyClientProvider()) {
   registerLookupPartsTool(server, getClient);
   registerListBomFilesTool(server);
   registerQueryResultsTool(server);
+  registerExportResultsTool(server);
 }
 function createServer(getClient = lazyClientProvider()) {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });

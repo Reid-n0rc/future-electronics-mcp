@@ -37,6 +37,10 @@
     {
       "name": "future_lookup_parts",
       "description": "Look up many parts at once, such as a BOM, with the best offer and price for each."
+    },
+    {
+      "name": "future_export_results",
+      "description": "Save a stored BOM lookup result to the workspace folder as CSV and/or JSON."
     }
   ],
   "compatibility": {
