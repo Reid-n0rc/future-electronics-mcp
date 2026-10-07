@@ -37,8 +37,8 @@ jobs:
         # engines is >=22.12 (vitest ^5 requires it; Node 18/20 are EOL).
         node-version: [22.x, 24.x]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -52,7 +52,7 @@ jobs:
     name: Hook tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       # Tests .githooks/pre-commit, .githooks/pre-push, and the Claude push
@@ -67,13 +67,13 @@ jobs:
       contents: read
       pull-requests: read # gitleaks-action lists the PR's commits via the API
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # scan the full history, not just the tip
       # Uses .gitleaks.toml at the repo root. This repo is on a personal
       # account, so gitleaks-action needs no GITLEAKS_LICENSE. GITHUB_TOKEN is
       # the built-in, read-only (contents: read) token used to read PR commits.
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -81,8 +81,8 @@ jobs:
     name: Bundle is up to date
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: npm
@@ -96,8 +96,8 @@ jobs:
     name: Claude Desktop bundle (.mcpb)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: npm
@@ -107,7 +107,7 @@ jobs:
       - run: npm run pack:mcpb
       # For manual testing: download it from the run's Artifacts section and
       # open it in Claude Desktop. The artifact is a zip that contains the .mcpb.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: future-electronics-mcp-mcpb
           path: build/future-electronics-mcp.mcpb
@@ -128,10 +128,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: npm
