@@ -126,9 +126,9 @@ describe("mcpb/manifest.json: user_config", () => {
 });
 
 describe("mcpb/manifest.json: tools", () => {
-  it("lists both tools the server registers, with short descriptions", () => {
+  it("lists the tools the server registers, with short descriptions", () => {
     const names = (manifest.tools ?? []).map((t) => t.name).sort();
-    expect(names).toEqual(["future_lookup_part", "future_lookup_parts"]);
+    expect(names).toEqual(["future_export_results", "future_lookup_part", "future_lookup_parts"]);
     const bundle = read(manifest.server.entry_point);
     for (const tool of manifest.tools ?? []) {
       expect(bundle).toContain(`"${tool.name}"`);

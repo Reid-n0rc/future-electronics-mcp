@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { lazyClientProvider, type ClientProvider } from "./tools/common.js";
+import { registerExportResultsTool } from "./tools/exportResults.js";
 import { registerLookupPartTool } from "./tools/lookupPart.js";
 import { registerLookupPartsTool } from "./tools/lookupParts.js";
 import { registerListBomFilesTool } from "./tools/listBomFiles.js";
@@ -17,6 +18,7 @@ export function registerTools(server: McpServer, getClient: ClientProvider = laz
   registerLookupPartsTool(server, getClient);
   registerListBomFilesTool(server);
   registerQueryResultsTool(server);
+  registerExportResultsTool(server);
 }
 
 /** Create a new, unconnected MCP server with all tools registered. */

@@ -152,7 +152,8 @@ separate filesystem connector.
 
 ## MCP tools
 
-All tools are read-only. `future_list_bom_files` is described under
+All tools are read-only except `future_export_results`, which writes files
+into the workspace folder only. `future_list_bom_files` is described under
 [BOM files](#bom-files). Every summary carries a `note` saying that pricing is
 not an official quote.
 
@@ -406,6 +407,35 @@ it was last stored or queried, at most 20 are kept (the least recently used is
 evicted first), and all are lost when the server restarts. An unknown or
 expired `result_id` returns an `isError` result saying to run
 `future_lookup_parts` again. The id is a random UUID.
+
+### `future_export_results`
+
+Save a stored `future_lookup_parts` result to the
+[workspace folder](#workspace-folder) as CSV and/or JSON, **without calling the
+Future API**, so a whole BOM can be opened in a spreadsheet instead of being
+read into the chat.
+
+| Input       | Type   | Default  | Limits and notes                                                |
+|-------------|--------|----------|-----------------------------------------------------------------|
+| `result_id` | string | required | From a `future_lookup_parts` result.                             |
+| `format`    | string | `"csv"`  | `"csv"`, `"json"`, or `"both"`.                                  |
+
+- **CSV** has the same columns as `future_query_results` (`part_number`,
+  `mpn`, `status`, `reason`, `quantity`, `available`, `moq`, `lead_time`,
+  `currency`, `unit_price`), one row per part in input order. It follows
+  RFC 4180 with CRLF line endings. A text cell starting with `=`, `+`, `-`,
+  `@`, tab or CR gets a leading `'`, so a spreadsheet shows it as text
+  instead of running it as a formula.
+- **JSON** is the full stored result: `result_id`, `note`, every part,
+  `totals`, `created_at`, and the raw upstream `batches`.
+
+Files go to `exports/<YYYYMMDD-HHMMSS>-<result_id>.csv` (or `.json`) inside
+the workspace, using UTC time. The `exports/` folder is created if needed, and
+an existing file is never overwritten (a `-2`, `-3`, ... suffix is added). The
+output is `result_id`, `note`, and `files: [{format, path, rows, bytes}]`,
+where `path` is relative to the workspace folder; the workspace path itself is
+never returned. An unknown or expired `result_id` returns the same error as
+`future_query_results`.
 
 ## Errors
 
